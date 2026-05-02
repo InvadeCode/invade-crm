@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Activity, ArrowRight, BarChart3, Briefcase, ChevronRight, ChevronLeft,
   Clock, Database, Edit3, FileText, LayoutDashboard, Lock, 
@@ -103,6 +103,25 @@ const supabaseDb = {
   }
 };
 
+// API Retry helper for Gemini
+const fetchWithRetry = async (url, options, maxRetries = 5) => {
+  let delay = 1000;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        if (i === maxRetries - 1) return response; 
+        throw new Error('API Error');
+      }
+      return response;
+    } catch (err) {
+      if (i === maxRetries - 1) throw err;
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2;
+    }
+  }
+};
+
 // ============================================================================
 // 1. GLOBAL DESIGN SYSTEM & TOKENS
 // ============================================================================
@@ -148,7 +167,7 @@ const Card = ({ children, className = '', noPadding = false, glow = false, onCli
       ${THEME.bgCard} border ${THEME.border} ${THEME.radius.lg} backdrop-blur-xl relative overflow-hidden
       ${onClick ? 'cursor-pointer hover:bg-white/[0.04] hover:border-white/10 transition-all duration-300 hover:-translate-y-0.5' : ''}
       ${glow ? 'shadow-[0_0_30px_rgba(6,182,212,0.05)] border-cyan-500/10' : 'shadow-2xl'}
-      ${noPadding ? '' : 'p-6'} 
+      ${noPadding ? '' : 'p-4 sm:p-6'} 
       ${className}
     `}
   >
@@ -158,7 +177,7 @@ const Card = ({ children, className = '', noPadding = false, glow = false, onCli
 );
 
 const Button = ({ children, variant = 'primary', className = '', onClick, type = 'button', disabled = false, icon: Icon }) => {
-  const base = `inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-semibold uppercase tracking-wider transition-all duration-300 ${THEME.radius.md} disabled:opacity-50 disabled:cursor-not-allowed`;
+  const base = `inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 text-[11px] sm:text-xs font-semibold uppercase tracking-wider transition-all duration-300 ${THEME.radius.md} disabled:opacity-50 disabled:cursor-not-allowed`;
   const variants = {
     primary: `${THEME.gradientPrimary} ${THEME.gradientHover} text-white ${THEME.glowCyan} border border-transparent hover:scale-[1.02] active:scale-[0.98]`,
     secondary: `bg-white/[0.03] hover:bg-white/[0.08] text-slate-200 border ${THEME.border} hover:border-white/[0.15]`,
@@ -167,7 +186,7 @@ const Button = ({ children, variant = 'primary', className = '', onClick, type =
   };
   return (
     <button type={type} onClick={onClick} disabled={disabled} className={`${base} ${variants[variant]} ${className}`}>
-      {Icon && <Icon className="w-4 h-4" />}
+      {Icon && <Icon className="w-4 h-4 shrink-0" />}
       {children}
     </button>
   );
@@ -236,29 +255,8 @@ const Badge = ({ children, variant = 'blue', className = '' }) => {
 };
 
 // ============================================================================
-// 3. MOCK DATA & CONSTANTS
+// 3. CONSTANTS
 // ============================================================================
-
-const MOCK_LEADS = [
-  { 
-    id: 'TC-1042', name: 'Sarah Jenkins', role: 'VP Operations', company: 'Acme Corp Global', email: 'sarah@acme.co', phone: '+1 555-0192', industry: 'Manufacturing', score: 85, status: 'Hot', time: '10m ago', tags: ['Decision Maker', 'High Value'],
-    owner: 'Anant Mishra',
-    consultant_brief: "Sarah mentioned their fulfillment centers are using legacy ERP systems. They are currently evaluating AI solutions to automate inventory alerts because manual data entry is causing a 12% error rate. Budget is secured for Q3.",
-    ai_next_steps: "1. Send 'Predictive Supply Chain' whitepaper.\n2. Schedule a 30-min technical discovery call with an architect.\n3. Prepare ROI projection focusing on 12% error rate reduction."
-  },
-  { 
-    id: 'TC-1041', name: 'Marcus Chen', role: 'CTO', company: 'NexusTech', email: 'mchen@nexus.io', phone: '+1 555-8821', industry: 'Technology', score: 42, status: 'Nurture', time: '45m ago', tags: ['Evaluator'],
-    owner: 'Elena Rostova',
-    consultant_brief: "Marcus is just browsing. They recently migrated to AWS but aren't looking to deploy new AI tools until next year.",
-    ai_next_steps: "1. Add to the quarterly 'AI in Tech' newsletter nurture sequence.\n2. Set task to follow up in 6 months for a Q1 roadmap check-in."
-  },
-  { 
-    id: 'TC-1040', name: 'Elena Rostova', role: 'Director of IT', company: 'GlobalData', email: 'elena.r@gdata.com', phone: '+1 555-3342', industry: 'Finance', score: 91, status: 'Hot', time: '2h ago', tags: ['High Urgency', 'Decision Maker'],
-    owner: 'Anant Mishra',
-    consultant_brief: "Critical regulatory compliance needs. Elena needs a secure, isolated LLM instance to process internal audit logs. They are terrified of data leakage and need to move immediately.",
-    ai_next_steps: "1. Route immediately to Enterprise Security Sales Team.\n2. Share the 'Secure LLM Governance' blueprint.\n3. Request NDA to proceed with technical architecture review."
-  },
-];
 
 const INDUSTRIES = ['Technology', 'Healthcare', 'Finance', 'Manufacturing', 'Retail', 'Agency/Services', 'Other'];
 const TEAM_SIZES = ['1-10', '11-50', '51-200', '201-1000', '1000+'];
@@ -326,38 +324,38 @@ const DashboardView = ({ onNavigate, onLeadSelect, leads = [] }) => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-12">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mb-4">
         <div>
           <div className="flex items-center gap-2 mb-2">
             <Radio className="w-4 h-4 text-rose-500 animate-pulse" />
             <Badge variant="rose" className="!px-2 !py-0.5">Live Telemetry Active</Badge>
           </div>
-          <h1 className="text-3xl font-light text-white tracking-tight">Command Center</h1>
-          <p className="text-sm text-slate-400 mt-1">Real-time booth telemetry and active pipeline diagnostics.</p>
+          <h1 className="text-2xl sm:text-3xl font-light text-white tracking-tight">Command Center</h1>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1">Real-time booth telemetry and active pipeline diagnostics.</p>
         </div>
-        <div className="flex gap-3">
-          <Button variant="secondary" icon={Search} onClick={() => onNavigate('directory')}>Registry</Button>
-          <Button icon={Plus} onClick={() => onNavigate('capture')}>New Capture</Button>
+        <div className="flex w-full sm:w-auto gap-3">
+          <Button variant="secondary" icon={Search} className="flex-1 sm:flex-none" onClick={() => onNavigate('directory')}>Registry</Button>
+          <Button icon={Plus} className="flex-1 sm:flex-none" onClick={() => onNavigate('capture')}>New Capture</Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: 'Total Acquisitions', value: stats.total.toString(), trend: 'Session', icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
           { label: 'High-Value Targets', value: stats.hot.toString(), trend: 'Score > 80', icon: Target, color: 'text-amber-400', bg: 'bg-amber-500/10' },
           { label: 'Avg Integrity Score', value: `${stats.avgScore}/100`, trend: 'Healthy Baseline', icon: ShieldCheck, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
           { label: 'AI Analyzed', value: stats.total.toString(), trend: '100% Coverage', icon: BrainCircuit, color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
         ].map((kpi, i) => (
-          <Card key={i} className="p-5 flex flex-col justify-between hover:border-white/10 transition-colors">
+          <Card key={i} className="p-4 sm:p-5 flex flex-col justify-between hover:border-white/10 transition-colors">
             <div className="flex justify-between items-start mb-4">
-              <div className={`w-10 h-10 ${THEME.radius.sm} ${kpi.bg} flex items-center justify-center border border-white/5`}>
-                <kpi.icon className={`w-5 h-5 ${kpi.color}`} />
+              <div className={`w-8 h-8 sm:w-10 sm:h-10 ${THEME.radius.sm} ${kpi.bg} flex items-center justify-center border border-white/5`}>
+                <kpi.icon className={`w-4 h-4 sm:w-5 sm:h-5 ${kpi.color}`} />
               </div>
-              <Badge variant={kpi.color.includes('emerald') ? 'emerald' : 'slate'} className="!text-[8px]">{kpi.trend}</Badge>
+              <Badge variant={kpi.color.includes('emerald') ? 'emerald' : 'slate'} className="!text-[8px] hidden sm:block">{kpi.trend}</Badge>
             </div>
             <div>
-              <p className="text-3xl font-light text-white tracking-tight">{kpi.value}</p>
-              <p className={`${THEME.label} mt-1`}>{kpi.label}</p>
+              <p className="text-2xl sm:text-3xl font-light text-white tracking-tight">{kpi.value}</p>
+              <p className={`${THEME.label} mt-1 truncate`}>{kpi.label}</p>
             </div>
           </Card>
         ))}
@@ -365,18 +363,18 @@ const DashboardView = ({ onNavigate, onLeadSelect, leads = [] }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Chart */}
-        <Card className="lg:col-span-2 p-6 flex flex-col" glow>
+        <Card className="lg:col-span-2 flex flex-col" glow>
           <div className="flex justify-between items-center mb-6">
             <div>
               <h3 className={`${THEME.label} text-white flex items-center gap-2`}><Globe className="w-4 h-4 text-cyan-400"/> Traffic Velocity</h3>
-              <p className="text-xs text-slate-500 mt-1">Lead acquisition rate over current session</p>
+              <p className="text-[10px] sm:text-xs text-slate-500 mt-1">Lead acquisition rate over current session</p>
             </div>
-            <div className="flex gap-2">
-              <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#22d3ee] animate-pulse mt-1"></span>
-              <span className="text-[10px] text-cyan-400 uppercase tracking-widest font-bold">Live</span>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#22d3ee] animate-pulse"></span>
+              <span className="text-[10px] text-cyan-400 uppercase tracking-widest font-bold hidden sm:block">Live</span>
             </div>
           </div>
-          <div className="h-[250px] w-full flex-1">
+          <div className="h-[200px] sm:h-[250px] w-full flex-1">
             {chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
@@ -400,13 +398,13 @@ const DashboardView = ({ onNavigate, onLeadSelect, leads = [] }) => {
         </Card>
 
         {/* Pipeline Donut Chart */}
-        <Card className="flex flex-col p-6">
+        <Card className="flex flex-col">
           <h3 className={`${THEME.label} text-white mb-1 flex items-center gap-2`}><Target className="w-4 h-4 text-rose-400"/> Pipeline Health</h3>
-          <p className="text-xs text-slate-500 mb-6">Distribution by diagnostic score</p>
+          <p className="text-[10px] sm:text-xs text-slate-500 mb-6">Distribution by diagnostic score</p>
           <div className="flex-1 min-h-[200px]">
             <ResponsiveContainer width="100%" height="100%">
               <RePieChart>
-                <Pie data={pipelineData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value" stroke="none">
+                <Pie data={pipelineData} cx="50%" cy="50%" innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="value" stroke="none">
                   {pipelineData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                 </Pie>
                 <RechartsTooltip contentStyle={{ backgroundColor: '#0B101D', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff' }} />
@@ -420,14 +418,14 @@ const DashboardView = ({ onNavigate, onLeadSelect, leads = [] }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Industry Bar Chart */}
-        <Card className="lg:col-span-2 p-6 flex flex-col">
+        <Card className="lg:col-span-2 flex flex-col">
           <div className="flex justify-between items-center mb-6">
             <div>
               <h3 className={`${THEME.label} text-white flex items-center gap-2`}><BarChart3 className="w-4 h-4 text-indigo-400"/> Sector Maturity Index</h3>
-              <p className="text-xs text-slate-500 mt-1">Average diagnostic score mapped by industry vertical</p>
+              <p className="text-[10px] sm:text-xs text-slate-500 mt-1">Average diagnostic score mapped by vertical</p>
             </div>
           </div>
-          <div className="h-[220px] w-full flex-1">
+          <div className="h-[200px] sm:h-[220px] w-full flex-1">
             {industryData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={industryData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
@@ -449,12 +447,12 @@ const DashboardView = ({ onNavigate, onLeadSelect, leads = [] }) => {
         </Card>
 
         {/* Live Event Feed */}
-        <Card className="flex flex-col p-0 overflow-hidden">
-          <div className="p-6 border-b border-white/5 flex items-center justify-between bg-black/20">
-            <h3 className={`${THEME.label} text-white flex items-center gap-2`}><Terminal className="w-4 h-4 text-emerald-400"/> Event Telemetry</h3>
+        <Card className="flex flex-col p-0 sm:p-0 overflow-hidden" noPadding>
+          <div className="p-4 sm:p-6 border-b border-white/5 flex items-center justify-between bg-black/20">
+            <h3 className={`${THEME.label} text-white flex items-center gap-2`}><Terminal className="w-4 h-4 text-emerald-400"/> Telemetry</h3>
             <span className="text-[10px] font-mono text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded">SYNCED</span>
           </div>
-          <div className="p-6 flex-1 overflow-y-auto space-y-6 custom-scrollbar bg-[#0B101D]/50">
+          <div className="p-4 sm:p-6 flex-1 overflow-y-auto space-y-6 custom-scrollbar bg-[#0B101D]/50 max-h-[300px] lg:max-h-full">
             {leads.slice(0, 6).map((lead, i) => (
               <div key={i} className="relative pl-6 group">
                 <div className="absolute left-[9px] top-6 bottom-[-24px] w-px bg-white/10 group-last:hidden"></div>
@@ -462,7 +460,7 @@ const DashboardView = ({ onNavigate, onLeadSelect, leads = [] }) => {
                    <UserPlus className="w-2.5 h-2.5 text-white" />
                 </div>
                 <div>
-                  <p className="text-sm text-slate-200 font-medium">Lead Captured: {lead.role} @ {lead.company}</p>
+                  <p className="text-xs sm:text-sm text-slate-200 font-medium truncate">Lead Captured: {lead.role}</p>
                   <p className="text-[10px] text-slate-500 font-mono mt-1">{formatTimeOnly(lead.created_at)}</p>
                 </div>
               </div>
@@ -473,41 +471,41 @@ const DashboardView = ({ onNavigate, onLeadSelect, leads = [] }) => {
       </div>
 
       {/* Recent Leads Table */}
-      <Card noPadding className="flex flex-col mt-6">
-        <div className="p-6 border-b border-white/5 flex justify-between items-center">
+      <Card noPadding className="flex flex-col mt-6 overflow-hidden">
+        <div className="p-4 sm:p-6 border-b border-white/5 flex justify-between items-center">
           <h3 className={`${THEME.label} text-white flex items-center gap-2`}><Database className="w-4 h-4 text-cyan-400"/> Live Lead Telemetry</h3>
           <button onClick={() => onNavigate('directory')} className="text-xs font-bold text-cyan-400 uppercase tracking-widest hover:text-cyan-300">View Registry</button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
+          <table className="w-full text-sm text-left whitespace-nowrap">
             <thead className={`${THEME.label} bg-black/20 border-b border-white/5`}>
               <tr>
-                <th className="px-6 py-4 font-semibold">Entity Profile</th>
-                <th className="px-6 py-4 font-semibold">AI Score</th>
-                <th className="px-6 py-4 font-semibold">Pipeline Status</th>
+                <th className="px-4 sm:px-6 py-4 font-semibold">Entity Profile</th>
+                <th className="px-4 sm:px-6 py-4 font-semibold">AI Score</th>
+                <th className="px-4 sm:px-6 py-4 font-semibold">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 text-slate-300">
               {leads.slice(0, 5).map((lead, i) => (
-                <tr key={lead.id} onClick={() => onLeadSelect(lead)} className="hover:bg-white/[0.03] transition-colors cursor-pointer group">
-                  <td className="px-6 py-4">
+                <tr key={lead.id || i} onClick={() => onLeadSelect(lead)} className="hover:bg-white/[0.03] transition-colors cursor-pointer group">
+                  <td className="px-4 sm:px-6 py-4">
                     <div className="font-medium text-white group-hover:text-cyan-400 transition-colors flex items-center gap-2">
                        {lead.name}
-                       {(lead.score >= 80 || lead.status === 'Hot') && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>}
+                       {(lead.score >= 80 || lead.status === 'Hot') && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0"></span>}
                     </div>
-                    <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                      <Briefcase className="w-3 h-3" /> {lead.role} @ <span className="text-slate-400">{lead.company}</span>
+                    <div className="text-xs text-slate-500 mt-1 flex items-center gap-1 sm:gap-2">
+                      <Briefcase className="w-3 h-3 shrink-0" /> <span className="truncate max-w-[120px] sm:max-w-[200px]">{lead.role} @ {lead.company}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 font-mono text-cyan-400">{lead.score || 0}</td>
-                  <td className="px-6 py-4">
+                  <td className="px-4 sm:px-6 py-4 font-mono text-cyan-400">{lead.score || 0}</td>
+                  <td className="px-4 sm:px-6 py-4">
                     <Badge variant={(lead.score >= 80 || lead.status === 'Hot') ? 'rose' : lead.status === 'Warm' ? 'amber' : 'blue'}>{lead.status || 'New'}</Badge>
                   </td>
                 </tr>
               ))}
               {leads.length === 0 && (
                 <tr>
-                  <td colSpan="3" className="px-6 py-8 text-center text-slate-500">No leads captured yet. Initialize a capture to populate dashboard.</td>
+                  <td colSpan="3" className="px-4 sm:px-6 py-8 text-center text-slate-500">No leads captured yet. Initialize a capture to populate dashboard.</td>
                 </tr>
               )}
             </tbody>
@@ -528,11 +526,11 @@ const LeadDirectoryView = ({ onNavigate, onLeadSelect, leads }) => {
     <div className="space-y-6 animate-in fade-in duration-500 pb-12">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mb-4">
         <div>
-          <h1 className="text-3xl font-light text-white tracking-tight">Entity Directory</h1>
-          <p className="text-sm text-slate-400 mt-1">Centralized repository of captured assets.</p>
+          <h1 className="text-2xl sm:text-3xl font-light text-white tracking-tight">Entity Directory</h1>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1">Centralized repository of captured assets.</p>
         </div>
-        <div className="flex gap-3">
-          <Button icon={Plus} onClick={() => onNavigate('capture')}>New Capture</Button>
+        <div className="flex w-full sm:w-auto gap-3">
+          <Button icon={Plus} className="w-full sm:w-auto" onClick={() => onNavigate('capture')}>New Capture</Button>
         </div>
       </div>
 
@@ -543,39 +541,37 @@ const LeadDirectoryView = ({ onNavigate, onLeadSelect, leads }) => {
 
       <div className="space-y-3">
         {leads.length === 0 && (
-          <div className="text-center p-12 border border-white/5 rounded-[20px] bg-black/20 text-slate-500">
+          <div className="text-center p-12 border border-white/5 rounded-[20px] bg-black/20 text-slate-500 text-sm">
             No leads found. Capture some leads to see them here!
           </div>
         )}
-        {leads.filter(l => l.name.toLowerCase().includes(search.toLowerCase()) || l.company.toLowerCase().includes(search.toLowerCase())).map(lead => (
-          <Card key={lead.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-5 group p-5 hover:border-cyan-500/30 cursor-pointer" onClick={() => onLeadSelect(lead)}>
-            <div className="flex items-center gap-5">
-              <div className={`hidden sm:flex w-12 h-12 ${THEME.radius.md} bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 items-center justify-center text-cyan-400 font-bold text-lg shadow-inner`}>
-                {lead.name.charAt(0)}
+        {leads.filter(l => l.name?.toLowerCase().includes(search.toLowerCase()) || l.company?.toLowerCase().includes(search.toLowerCase())).map((lead, idx) => (
+          <Card key={lead.id || idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-5 group hover:border-cyan-500/30 cursor-pointer" onClick={() => onLeadSelect(lead)}>
+            <div className="flex items-start sm:items-center gap-4 sm:gap-5 w-full sm:w-auto">
+              <div className={`hidden sm:flex shrink-0 w-12 h-12 ${THEME.radius.md} bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 items-center justify-center text-cyan-400 font-bold text-lg shadow-inner`}>
+                {lead.name?.charAt(0) || '?'}
               </div>
-              <div>
+              <div className="w-full min-w-0">
                 <div className="flex items-center gap-3 mb-1">
-                  <h3 className="text-white font-medium text-lg tracking-wide group-hover:text-cyan-400 transition-colors">{lead.name}</h3>
+                  <h3 className="text-white font-medium text-base sm:text-lg tracking-wide group-hover:text-cyan-400 transition-colors truncate">{lead.name}</h3>
                 </div>
-                <p className="text-slate-400 text-sm flex items-center">
-                  <Building2 size={14} className="mr-1.5 text-slate-500" /> {lead.company} 
-                  <span className="mx-3 opacity-30">|</span> 
-                  {lead.role}
+                <p className="text-slate-400 text-xs sm:text-sm flex items-center truncate">
+                  <Building2 size={14} className="mr-1.5 text-slate-500 shrink-0" /> <span className="truncate">{lead.company}</span>
+                  <span className="mx-2 sm:mx-3 opacity-30">|</span> 
+                  <span className="truncate">{lead.role}</span>
                 </p>
-                <p className="text-slate-500 text-xs flex items-center mt-1.5">
-                  <UserCircle size={12} className="mr-1 text-slate-600" /> Owner: <span className="ml-1 text-slate-400 font-medium">{lead.owner || 'Unassigned'}</span>
+                <p className="text-slate-500 text-[10px] sm:text-xs flex items-center mt-1.5">
+                  <UserCircle size={12} className="mr-1 text-slate-600 shrink-0" /> Owner: <span className="ml-1 text-slate-400 font-medium truncate">{lead.owner || 'Unassigned'}</span>
                 </p>
                 <div className="flex flex-wrap gap-2 mt-3">
-                  {(lead.tags || []).map((tag, i) => (
-                    <Badge key={i} variant={tag.includes('Decision') || tag.includes('High') ? 'amber' : 'slate'} className="!text-[8px]">{tag}</Badge>
-                  ))}
                   <Badge variant={(lead.score >= 80 || lead.status === 'Hot') ? 'rose' : lead.status === 'Warm' ? 'amber' : 'blue'} className="!text-[8px]">{lead.status || 'New'}</Badge>
+                  {(lead.industry) && <Badge variant="slate" className="!text-[8px]">{lead.industry}</Badge>}
                 </div>
               </div>
             </div>
             
-            <div className="flex items-center gap-6 sm:self-center self-end border-t sm:border-t-0 border-white/10 pt-4 sm:pt-0 w-full sm:w-auto justify-end">
-              <div className="text-right">
+            <div className="flex items-center justify-between sm:justify-end gap-6 border-t sm:border-t-0 border-white/10 pt-4 sm:pt-0 w-full sm:w-auto shrink-0 mt-2 sm:mt-0">
+              <div className="text-left sm:text-right">
                 <p className={`${THEME.label} mb-1.5`}>Maturity Score</p>
                 <div className="flex items-center gap-2">
                   <span className="text-xl font-light text-white">{lead.score || 0}</span>
@@ -594,7 +590,7 @@ const LeadDirectoryView = ({ onNavigate, onLeadSelect, leads }) => {
 };
 
 // ============================================================================
-// 6. MODULE: LEAD CAPTURE (Multi-step) WITH AI SCORING
+// 6. MODULE: LEAD CAPTURE (Multi-step) WITH AI SCORING & GEMINI OCR
 // ============================================================================
 
 const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
@@ -607,6 +603,9 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [isNewOwner, setIsNewOwner] = useState(false);
   
+  const cameraInputRef = useRef(null);
+  const fileInputRef = useRef(null);
+
   const [formData, setFormData] = useState({ 
     name: '', role: '', company: '', email: '', phone: '', industry: 'Technology', brief: '', owner: ''
   });
@@ -615,38 +614,92 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
   const uniqueOwners = useMemo(() => {
     const owners = leads.map(l => l.owner).filter(Boolean);
     const unique = [...new Set(owners)];
-    return unique.length > 0 ? unique : ['Anant Mishra']; // Fallback if fully empty
+    return unique.length > 0 ? unique : ['Anant Mishra'];
   }, [leads]);
 
-  // Set default owner to first item if available
+  // Set default owner
   useEffect(() => {
     if (uniqueOwners.length > 0 && !formData.owner && !isNewOwner) {
       setFormData(prev => ({ ...prev, owner: uniqueOwners[0] }));
     }
   }, [uniqueOwners, formData.owner, isNewOwner]);
 
-  const handleScan = () => {
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
     setIsScanning(true);
-    setTimeout(() => {
+    
+    try {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64String = reader.result.split(',')[1];
+        const mimeType = file.type;
+        
+        const apiKey = ""; // Provided by execution environment
+        const prompt = "Extract the contact information from this business card. If a field is missing, return an empty string.";
+        
+        const payload = {
+          contents: [{
+            role: "user",
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType, data: base64String } }
+            ]
+          }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                name: { type: "STRING", description: "Full name of the person" },
+                role: { type: "STRING", description: "Job title or role" },
+                company: { type: "STRING", description: "Company name" },
+                email: { type: "STRING", description: "Email address" },
+                phone: { type: "STRING", description: "Phone number" }
+              },
+              required: ["name", "role", "company", "email", "phone"]
+            }
+          }
+        };
+
+        const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error?.message || "Failed to process image");
+        
+        const extractedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (extractedText) {
+          const extractedData = JSON.parse(extractedText);
+          setFormData(prev => ({
+            ...prev,
+            name: extractedData.name || '',
+            role: extractedData.role || '',
+            company: extractedData.company || '',
+            email: extractedData.email || '',
+            phone: extractedData.phone || ''
+          }));
+        }
+
+        setIsScanning(false);
+        setScanComplete(true);
+        setActiveTab('manual');
+      };
+      
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error("OCR Error:", error);
+      alert("Failed to scan card using AI. Please try manual entry.");
       setIsScanning(false);
-      setScanComplete(true);
-      setFormData(prev => ({
-        ...prev,
-        name: 'Alex Developer',
-        role: 'Director of Technology',
-        company: 'Innovatech LLC',
-        email: 'alex@innovatech.example.com',
-        phone: '+1 555 0192',
-        industry: 'Technology'
-      }));
-      setActiveTab('manual');
-    }, 2000);
+    }
   };
 
   const calculateLeadScore = (data) => {
     let baseScore = 50; 
-    
-    // 1. Role Authority
     const role = (data.role || '').toLowerCase();
     if (role.includes('c-') || role.includes('chief') || role.includes('vp') || role.includes('president') || role.includes('founder') || role.includes('partner') || role.includes('cio') || role.includes('cto') || role.includes('ceo')) {
       baseScore += 20;
@@ -655,12 +708,8 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
     } else if (role.includes('manager')) {
       baseScore += 5;
     }
-
-    // 2. Engagement / Brief Depth
     if (data.brief && data.brief.length > 50) baseScore += 15;
     else if (data.brief && data.brief.length > 10) baseScore += 5;
-
-    // 3. Sector Relevance
     if (data.industry && data.industry !== 'Other') baseScore += 5;
 
     return Math.min(Math.max(baseScore, 1), 99);
@@ -699,7 +748,7 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
         onNavigate('directory'); 
       } catch (error) {
         console.error("Error saving lead:", error);
-        alert("Failed to save lead to Database. Ensure the 'leads' table has the new consultant_brief, ai_next_steps, and owner columns.");
+        alert("Failed to save lead to Database.");
       } finally {
         setIsSaving(false);
       }
@@ -708,16 +757,16 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
 
   return (
     <div className="max-w-3xl mx-auto animate-in fade-in duration-500 pb-12">
-      <Card className="p-8 sm:p-12 relative overflow-hidden" glow>
+      <Card className="p-6 sm:p-12 relative overflow-hidden" glow>
         
-        <div className="flex justify-between items-center mb-12 pb-6 border-b border-white/5">
+        <div className="flex justify-between items-center mb-8 sm:mb-12 pb-6 border-b border-white/5">
           <Badge variant="cyan">Acquisition Node Active</Badge>
-          <button onClick={() => onNavigate('dashboard')} className="text-slate-500 hover:text-white transition-colors">
+          <button onClick={() => onNavigate('dashboard')} className="text-slate-500 hover:text-white transition-colors p-2">
             <X size={20} />
           </button>
         </div>
 
-        <div className="w-full mb-12 relative">
+        <div className="w-full mb-8 sm:mb-12 relative">
           <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-[2px] bg-white/5 z-0"></div>
           <div 
             className={`absolute left-0 top-1/2 transform -translate-y-1/2 h-[2px] ${THEME.gradientPrimary} z-0 transition-all duration-700 ease-out`}
@@ -730,14 +779,14 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
               const isActive = step === stepNum;
               const isPast = step > stepNum;
               return (
-                <div key={label} className="flex flex-col items-center group">
-                  <div className={`w-10 h-10 ${THEME.radius.md} flex items-center justify-center text-sm font-bold transition-all duration-500
+                <div key={label} className="flex flex-col items-center group relative">
+                  <div className={`w-8 h-8 sm:w-10 sm:h-10 ${THEME.radius.md} flex items-center justify-center text-xs sm:text-sm font-bold transition-all duration-500
                     ${isActive ? `bg-cyan-500 text-slate-900 ${THEME.glowCyan} scale-110` : 
                       isPast ? 'bg-[#0B101D] text-cyan-400 border border-cyan-500/50' : 'bg-[#0B101D] text-slate-600 border border-white/10'}`}
                   >
-                    {isPast ? <Check size={18} /> : stepNum}
+                    {isPast ? <Check size={16} /> : stepNum}
                   </div>
-                  <span className={`absolute -bottom-8 text-[9px] uppercase tracking-widest font-bold whitespace-nowrap transition-colors ${isActive ? 'text-cyan-400' : 'text-slate-600'}`}>
+                  <span className={`hidden sm:block absolute -bottom-8 text-[9px] uppercase tracking-widest font-bold whitespace-nowrap transition-colors ${isActive ? 'text-cyan-400' : 'text-slate-600'}`}>
                     {label}
                   </span>
                 </div>
@@ -749,9 +798,9 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
         <div className="min-h-[300px]">
           {step === 1 && (
             <div className="space-y-6 animate-in slide-in-from-right-8 duration-500">
-              <h2 className="text-2xl font-light text-white tracking-tight mb-4">Operator <span className="font-semibold text-cyan-400">Identity</span></h2>
+              <h2 className="text-xl sm:text-2xl font-light text-white tracking-tight mb-4">Operator <span className="font-semibold text-cyan-400">Identity</span></h2>
               
-              <div className="bg-black/20 border border-white/5 p-5 rounded-[16px] mb-8">
+              <div className="bg-black/20 border border-white/5 p-4 sm:p-5 rounded-[16px] mb-6 sm:mb-8">
                 {!isNewOwner ? (
                   <div className="space-y-1.5 w-full">
                     <label className={`${THEME.label} ml-1`}>Assigned Lead Owner</label>
@@ -794,27 +843,36 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
                 )}
               </div>
 
-              <div className="flex gap-2 p-1 bg-black/40 border border-white/5 rounded-xl w-fit mb-6">
-                <button onClick={() => setActiveTab('scan')} className={`px-6 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'scan' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Scan Card</button>
-                <button onClick={() => setActiveTab('manual')} className={`px-6 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'manual' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Manual Entry</button>
+              <div className="flex gap-2 p-1 bg-black/40 border border-white/5 rounded-xl w-full sm:w-fit mb-6">
+                <button onClick={() => setActiveTab('scan')} className={`flex-1 sm:flex-none px-4 sm:px-6 py-2 rounded-lg text-[11px] sm:text-sm font-semibold transition-all ${activeTab === 'scan' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Scan Card</button>
+                <button onClick={() => setActiveTab('manual')} className={`flex-1 sm:flex-none px-4 sm:px-6 py-2 rounded-lg text-[11px] sm:text-sm font-semibold transition-all ${activeTab === 'manual' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Manual Entry</button>
               </div>
 
               {activeTab === 'scan' && (
-                <div className="p-12 flex flex-col items-center justify-center text-center border-dashed border-2 border-white/10 rounded-2xl hover:border-cyan-500/30 transition-colors min-h-[300px] bg-black/20">
+                <div className="p-8 sm:p-12 flex flex-col items-center justify-center text-center border-dashed border-2 border-white/10 rounded-2xl hover:border-cyan-500/30 transition-colors min-h-[300px] bg-black/20">
+                  {/* Two separate file inputs to distinctively support camera vs upload on mobile */}
+                  <input type="file" accept="image/*" capture="environment" className="hidden" ref={cameraInputRef} onChange={handleFileChange} />
+                  <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+                  
                   {isScanning ? (
                      <div className="flex flex-col items-center">
                        <div className="w-12 h-12 mb-4 rounded-full border-4 border-cyan-500/20 border-t-cyan-500 animate-spin"></div>
                        <h3 className="text-lg font-medium text-white mb-2">Analyzing Image...</h3>
-                       <p className="text-sm text-slate-400">Extracting contact entities via OCR.</p>
+                       <p className="text-sm text-slate-400">Extracting contact entities via Gemini AI.</p>
                      </div>
                   ) : (
-                    <div className="flex flex-col items-center">
+                    <div className="flex flex-col items-center w-full">
                       <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mb-4 text-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.15)]">
                         <Camera className="w-8 h-8" />
                       </div>
-                      <h3 className="text-xl font-medium text-white mb-2">Scan Business Card</h3>
-                      <p className="text-sm text-slate-400 max-w-sm mb-6">Use your device camera to instantly parse and digitize business card information.</p>
-                      <Button onClick={handleScan} icon={UploadCloud}>Tap to Scan</Button>
+                      <h3 className="text-lg sm:text-xl font-medium text-white mb-2">Scan Business Card</h3>
+                      <p className="text-xs sm:text-sm text-slate-400 max-w-sm mb-8 leading-relaxed">
+                        Use your device camera or upload an image to digitize card information.
+                      </p>
+                      <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto">
+                        <Button onClick={() => cameraInputRef.current?.click()} icon={Camera} className="w-full sm:w-auto">Take Photo</Button>
+                        <Button variant="secondary" onClick={() => fileInputRef.current?.click()} icon={UploadCloud} className="w-full sm:w-auto">Upload File</Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -824,19 +882,19 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
                 <div className="space-y-6 animate-in fade-in">
                   {scanComplete && (
                     <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-3">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
                       <div>
                         <p className="text-sm font-medium text-emerald-100">Scan Successful</p>
                         <p className="text-xs text-emerald-400/70 mt-1">Please verify the extracted information below.</p>
                       </div>
                     </div>
                   )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                     <Input label="Full Name" icon={User} value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required />
                     <Input label="Job Role" icon={Briefcase} value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})} required />
                   </div>
                   <Input label="Comms Channel (Email)" type="email" icon={Mail} value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} required />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                     <Input label="Direct Line" icon={PhoneCall} value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
                     <Input label="Company" icon={Building2} value={formData.company} onChange={e => setFormData({...formData, company: e.target.value})} required />
                   </div>
@@ -847,7 +905,7 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
 
           {step === 2 && (
             <div className="space-y-6 animate-in slide-in-from-right-8 duration-500">
-              <h2 className="text-2xl font-light text-white tracking-tight mb-8">Corporate <span className="font-semibold text-cyan-400">Entity</span></h2>
+              <h2 className="text-xl sm:text-2xl font-light text-white tracking-tight mb-8">Corporate <span className="font-semibold text-cyan-400">Entity</span></h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <Select label="Operational Sector" options={INDUSTRIES} icon={Layers} value={formData.industry} onChange={e => setFormData({...formData, industry: e.target.value})} />
                 <Select label="Personnel Count" options={TEAM_SIZES} icon={Users} />
@@ -860,7 +918,7 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
 
           {step === 3 && (
             <div className="space-y-6 animate-in slide-in-from-right-8 duration-500">
-              <h2 className="text-2xl font-light text-white tracking-tight mb-8">Strategic <span className="font-semibold text-cyan-400">Intent</span></h2>
+              <h2 className="text-xl sm:text-2xl font-light text-white tracking-tight mb-8">Strategic <span className="font-semibold text-cyan-400">Intent</span></h2>
               
               <TextArea 
                 label="Consultant Brief (Internal Notes)" 
@@ -884,7 +942,7 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
                   <div className="w-20 h-20 bg-blue-500/10 border border-blue-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
                     <BrainCircuit className="w-10 h-10 text-blue-400 animate-pulse" />
                   </div>
-                  <h2 className="text-2xl font-light text-white tracking-tight mb-2">AI Synthesizing Score & Next Steps...</h2>
+                  <h2 className="text-xl sm:text-2xl font-light text-white tracking-tight mb-2">AI Synthesizing Score & Next Steps...</h2>
                   <p className="text-sm text-slate-400 max-w-sm mx-auto">Processing your consultant brief and entity profile to generate actionable workflow recommendations.</p>
                 </div>
               ) : (
@@ -892,11 +950,11 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
                   <div className="w-20 h-20 bg-emerald-500/10 border border-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_rgba(16,185,129,0.2)]">
                     <CheckCircle2 className="w-10 h-10 text-emerald-400" />
                   </div>
-                  <h2 className="text-2xl font-light text-white tracking-tight mb-2">Entity Captured</h2>
-                  <p className="text-sm text-slate-400 max-w-sm mx-auto">Profile and AI-generated strategy have been securely synced. Ready for review.</p>
+                  <h2 className="text-xl sm:text-2xl font-light text-white tracking-tight mb-2">Entity Captured</h2>
+                  <p className="text-sm text-slate-400 max-w-sm mx-auto px-4">Profile and AI-generated strategy have been securely synced. Ready for review.</p>
                   
                   <div className="mt-10 flex justify-center gap-4">
-                    <Button onClick={handleSubmit} icon={Check}>
+                    <Button onClick={handleSubmit} icon={Check} className="w-full sm:w-auto">
                       Save & Complete
                     </Button>
                   </div>
@@ -907,10 +965,10 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
         </div>
 
         {step < 4 && (
-          <div className="flex justify-between items-center mt-12 pt-8 border-t border-white/5">
-            <Button variant="ghost" onClick={() => setStep(prev => Math.max(1, prev - 1))} disabled={step === 1} icon={ChevronLeft}>Back</Button>
-            <Button onClick={() => setStep(prev => prev + 1)}>
-              Continue <ChevronRight className="w-4 h-4 ml-1" />
+          <div className="flex flex-col-reverse sm:flex-row justify-between items-center mt-12 pt-8 border-t border-white/5 gap-4 sm:gap-0">
+            <Button variant="ghost" onClick={() => setStep(prev => Math.max(1, prev - 1))} disabled={step === 1} icon={ChevronLeft} className="w-full sm:w-auto">Back</Button>
+            <Button onClick={() => setStep(prev => prev + 1)} className="w-full sm:w-auto">
+              Continue <ChevronRight className="w-4 h-4 ml-1 hidden sm:block" />
             </Button>
           </div>
         )}
@@ -936,7 +994,7 @@ const LeadDetailDrawer = ({ lead, onClose, onLeadUpdated }) => {
   const handleSave = async () => {
     setIsUpdating(true);
     try {
-      await supabaseDb.updateLead(lead.id, { status });
+      await supabaseDb.updateLeadStatus(lead.id, status);
       if (onLeadUpdated) await onLeadUpdated();
       onClose();
     } catch (e) {
@@ -950,23 +1008,23 @@ const LeadDetailDrawer = ({ lead, onClose, onLeadUpdated }) => {
   return (
     <>
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 transition-opacity animate-in fade-in" onClick={onClose} />
-      <div className="fixed inset-y-2 right-2 w-full max-w-md bg-[#0B101D] border border-white/10 rounded-[24px] shadow-2xl z-50 flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
+      <div className="fixed inset-y-0 right-0 w-full sm:w-[400px] sm:max-w-md bg-[#0B101D] border-l border-white/10 shadow-2xl z-50 flex flex-col overflow-hidden animate-in slide-in-from-right duration-300 sm:rounded-l-[24px]">
         
         {/* Header */}
         <div className="p-6 border-b border-white/5 bg-white/[0.02] flex justify-between items-start relative overflow-hidden shrink-0">
           <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
           
           <div className="relative z-10 flex items-center gap-4">
-            <div className={`w-12 h-12 ${THEME.radius.md} bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 flex items-center justify-center text-cyan-400 font-bold text-lg shadow-inner`}>
-              {lead.name.charAt(0)}
+            <div className={`w-12 h-12 ${THEME.radius.md} bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 flex items-center justify-center text-cyan-400 font-bold text-lg shadow-inner shrink-0`}>
+              {lead.name?.charAt(0) || '?'}
             </div>
-            <div>
-              <h2 className="text-lg font-medium text-white">{lead.name}</h2>
-              <p className="text-xs text-slate-400 mt-0.5">{lead.role} @ {lead.company}</p>
+            <div className="min-w-0 pr-4">
+              <h2 className="text-lg font-medium text-white truncate">{lead.name}</h2>
+              <p className="text-xs text-slate-400 mt-0.5 truncate">{lead.role} @ {lead.company}</p>
             </div>
           </div>
           
-          <button onClick={onClose} className="p-2 text-slate-500 hover:text-white bg-white/[0.05] hover:bg-white/[0.1] rounded-[12px] transition-colors relative z-10">
+          <button onClick={onClose} className="p-2 text-slate-500 hover:text-white bg-white/[0.05] hover:bg-white/[0.1] rounded-[12px] transition-colors relative z-10 shrink-0">
             <X size={16} />
           </button>
         </div>
@@ -975,21 +1033,21 @@ const LeadDetailDrawer = ({ lead, onClose, onLeadUpdated }) => {
         <div className="p-6 overflow-y-auto custom-scrollbar flex-1 space-y-6">
           
           {/* Quick Stats */}
-          <div className="flex gap-4">
-            <div className="flex-1 bg-black/40 border border-white/5 p-4 rounded-[16px]">
+          <div className="flex flex-wrap gap-4">
+            <div className="flex-1 min-w-[120px] bg-black/40 border border-white/5 p-4 rounded-[16px]">
               <p className={`${THEME.label} mb-1`}>AI Score</p>
               <p className="text-2xl font-light text-cyan-400">{lead.score || '--'}</p>
             </div>
-            <div className="flex-1 bg-black/40 border border-white/5 p-4 rounded-[16px]">
+            <div className="flex-1 min-w-[120px] bg-black/40 border border-white/5 p-4 rounded-[16px]">
               <p className={`${THEME.label} mb-1`}>Owner</p>
-              <p className="text-sm font-medium text-slate-300 mt-2">{lead.owner || 'Unassigned'}</p>
+              <p className="text-sm font-medium text-slate-300 mt-2 truncate">{lead.owner || 'Unassigned'}</p>
             </div>
-            <div className="flex-1 bg-black/40 border border-white/5 p-4 rounded-[16px]">
+            <div className="w-full bg-black/40 border border-white/5 p-4 rounded-[16px]">
               <p className={`${THEME.label} mb-1`}>Status</p>
               <select 
                 value={status} 
                 onChange={(e) => setStatus(e.target.value)}
-                className={`mt-1 block w-full bg-[#1A2235] border border-white/10 ${THEME.radius.sm} p-1 text-xs text-white focus:outline-none focus:border-cyan-500`}
+                className={`mt-1 block w-full bg-[#1A2235] border border-white/10 ${THEME.radius.sm} p-2 text-xs text-white focus:outline-none focus:border-cyan-500`}
               >
                 {['New', 'Nurture', 'Warm', 'Hot', 'Deep Consult'].map(opt => (
                   <option key={opt} value={opt}>{opt}</option>
@@ -1003,7 +1061,7 @@ const LeadDetailDrawer = ({ lead, onClose, onLeadUpdated }) => {
             <h3 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2 mb-3 border-b border-white/5 pb-2">
               <MessageSquare className="w-4 h-4 text-blue-400" /> Consultant Brief
             </h3>
-            <div className="bg-white/[0.02] border border-white/5 p-4 rounded-[16px] text-sm text-slate-300 leading-relaxed font-light whitespace-pre-wrap">
+            <div className="bg-white/[0.02] border border-white/5 p-4 rounded-[16px] text-sm text-slate-300 leading-relaxed font-light whitespace-pre-wrap break-words">
               {lead.consultant_brief || "No brief recorded for this lead."}
             </div>
           </div>
@@ -1013,7 +1071,7 @@ const LeadDetailDrawer = ({ lead, onClose, onLeadUpdated }) => {
             <h3 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2 mb-3 border-b border-white/5 pb-2">
               <BrainCircuit className="w-4 h-4 text-purple-400" /> AI Strategic Next Steps
             </h3>
-            <div className="bg-purple-500/5 border border-purple-500/20 p-4 rounded-[16px] text-sm text-purple-100 leading-relaxed font-light whitespace-pre-wrap">
+            <div className="bg-purple-500/5 border border-purple-500/20 p-4 rounded-[16px] text-sm text-purple-100 leading-relaxed font-light whitespace-pre-wrap break-words">
               {lead.ai_next_steps || "No AI strategy generated. Update the brief to generate recommendations."}
             </div>
           </div>
@@ -1021,9 +1079,9 @@ const LeadDetailDrawer = ({ lead, onClose, onLeadUpdated }) => {
         </div>
 
         {/* Footer */}
-        <div className="p-6 border-t border-white/5 bg-black/20 shrink-0">
+        <div className="p-4 sm:p-6 border-t border-white/5 bg-black/20 shrink-0 pb-safe">
           <Button variant="primary" onClick={handleSave} disabled={isUpdating} className="w-full">
-            {isUpdating ? 'Saving...' : 'Save Configuration'} <ArrowRight size={16}/>
+            {isUpdating ? 'Saving...' : 'Save Configuration'} <ArrowRight size={16} className="ml-2" />
           </Button>
         </div>
 
@@ -1064,13 +1122,13 @@ const AIInsightsView = ({ leads }) => {
     <div className="space-y-6 animate-in fade-in duration-500 pb-12 max-w-5xl mx-auto">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-4">
         <div>
-          <h1 className="text-3xl font-light text-white tracking-tight flex items-center gap-3">
-            <Sparkles className="w-6 h-6 text-purple-400" /> Global AI Insights
+          <h1 className="text-2xl sm:text-3xl font-light text-white tracking-tight flex items-center gap-3">
+            <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 text-purple-400" /> Global AI Insights
           </h1>
-          <p className="text-sm text-slate-400 mt-1">Autonomous analysis of all captured booth telemetry.</p>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1">Autonomous analysis of all captured booth telemetry.</p>
         </div>
         {!hasAnalyzed && (
-          <Button onClick={handleAnalysis} disabled={isAnalyzing || !leads || leads.length === 0} className="!bg-gradient-to-r !from-purple-600 !to-indigo-500 shadow-[0_0_20px_rgba(168,85,247,0.3)]">
+          <Button onClick={handleAnalysis} disabled={isAnalyzing || !leads || leads.length === 0} className="!bg-gradient-to-r !from-purple-600 !to-indigo-500 shadow-[0_0_20px_rgba(168,85,247,0.3)] w-full sm:w-auto">
             {isAnalyzing ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : <BrainCircuit className="w-4 h-4 mr-2" />}
             {isAnalyzing ? 'Analyzing Database...' : 'Run Global Analysis'}
           </Button>
@@ -1081,7 +1139,7 @@ const AIInsightsView = ({ leads }) => {
         <Card className="py-20 text-center border-purple-500/20 glow border-dashed border-2">
           <BrainCircuit className="w-16 h-16 mx-auto text-slate-700 mb-6" />
           <h3 className="text-xl font-medium text-white mb-2">Analysis Engine Idle</h3>
-          <p className="text-slate-400 text-sm max-w-md mx-auto">Click "Run Global Analysis" to trigger the LLM to process your {leads ? leads.length : 0} captured leads and identify strategic patterns.</p>
+          <p className="text-slate-400 text-xs sm:text-sm max-w-md mx-auto px-4">Click "Run Global Analysis" to trigger the LLM to process your {leads ? leads.length : 0} captured leads and identify strategic patterns.</p>
         </Card>
       )}
 
@@ -1095,7 +1153,7 @@ const AIInsightsView = ({ leads }) => {
             </div>
           </div>
           <h3 className="text-xl font-medium text-white mb-2 animate-pulse">Synthesizing Telemetry...</h3>
-          <p className="text-slate-400 text-sm font-mono uppercase tracking-widest">Processing {leads ? leads.length : 0} lead entities</p>
+          <p className="text-slate-400 text-xs sm:text-sm font-mono uppercase tracking-widest">Processing {leads ? leads.length : 0} lead entities</p>
         </Card>
       )}
 
@@ -1104,11 +1162,11 @@ const AIInsightsView = ({ leads }) => {
           {latestLead && (
             <Card className="border-t-2 border-t-emerald-500 bg-gradient-to-b from-emerald-900/10 to-transparent">
               <h3 className={`${THEME.label} text-emerald-400 mb-4 flex items-center gap-2`}><User className="w-4 h-4"/> Recent Lead Insight: {latestLead.name}</h3>
-              <p className="text-sm text-slate-300 leading-relaxed font-light mb-6">
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-light mb-6">
                 Based on the recent scan of <strong className="text-white">{latestLead.name} ({latestLead.role} @ {latestLead.company})</strong>, the AI predicts a high intent for <strong className="text-white">Enterprise Automation</strong> and <strong className="text-white">Op Debt reduction</strong>. Given the {latestLead.industry || 'technology'} sector context, we recommend fast-tracking this lead to a <strong className="text-white">Deep Consult</strong> emphasizing infrastructure scaling and technical ROI.
               </p>
               <div className="p-3 bg-black/40 border border-white/5 rounded-lg flex items-start gap-3">
-                <span className="text-emerald-500 mt-0.5">›</span>
+                <span className="text-emerald-500 mt-0.5 shrink-0">›</span>
                 <span className="text-xs text-slate-400">Action item: Send the "Op Debt Reduction" whitepaper and propose a 15-minute technical architecture review.</span>
               </div>
             </Card>
@@ -1117,7 +1175,7 @@ const AIInsightsView = ({ leads }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card className="border-t-2 border-t-purple-500 bg-gradient-to-b from-purple-900/10 to-transparent">
               <h3 className={`${THEME.label} text-purple-400 mb-4 flex items-center gap-2`}><Target className="w-4 h-4"/> Audience Composition</h3>
-              <p className="text-sm text-slate-300 leading-relaxed font-light mb-6">
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-light mb-6">
                 The AI detected a significant skew based on your {leads ? leads.length : 0} captures. The dominant sector is currently <strong className="text-white">{chartData.length > 0 ? chartData.sort((a,b)=>b.val-a.val)[0].name : 'Unknown'}</strong>.
               </p>
               <div className="h-[150px]">
@@ -1138,17 +1196,17 @@ const AIInsightsView = ({ leads }) => {
 
             <Card className="border-t-2 border-t-blue-500 bg-gradient-to-b from-blue-900/10 to-transparent">
               <h3 className={`${THEME.label} text-blue-400 mb-4 flex items-center gap-2`}><AlertTriangle className="w-4 h-4"/> Revenue Bottlenecks</h3>
-              <p className="text-sm text-slate-300 leading-relaxed font-light mb-6">
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-light mb-6">
                 Sentiment analysis across captured profiles reveals a consistent trend: highly qualified leads are struggling with legacy system integration, delaying adoption timelines.
               </p>
               <div className="space-y-3">
                 <div className="p-3 bg-black/40 border border-white/5 rounded-lg flex items-start gap-3">
-                  <span className="text-blue-500 mt-0.5">›</span>
-                  <span className="text-xs text-slate-400">High priority recommendation: Pivot follow-up messaging to highlight our pre-built integration connectors.</span>
+                  <span className="text-blue-500 mt-0.5 shrink-0">›</span>
+                  <span className="text-[11px] sm:text-xs text-slate-400">High priority recommendation: Pivot follow-up messaging to highlight our pre-built integration connectors.</span>
                 </div>
                 <div className="p-3 bg-black/40 border border-white/5 rounded-lg flex items-start gap-3">
-                  <span className="text-blue-500 mt-0.5">›</span>
-                  <span className="text-xs text-slate-400">Opportunity identified: Fast-track leads scoring &gt;80 directly to technical architects.</span>
+                  <span className="text-blue-500 mt-0.5 shrink-0">›</span>
+                  <span className="text-[11px] sm:text-xs text-slate-400">Opportunity identified: Fast-track leads scoring &gt;80 directly to technical architects.</span>
                 </div>
               </div>
             </Card>
@@ -1169,33 +1227,33 @@ const MyQRView = () => {
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodedVcard}&color=030712&bgcolor=ffffff&margin=0`;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-12 max-w-lg mx-auto mt-10">
-      <Card className="text-center p-8 sm:p-12" glow>
-        <div className="w-20 h-20 mx-auto rounded-[20px] bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(6,182,212,0.3)]">
-          <QrCode className="w-10 h-10 text-white" />
+    <div className="space-y-6 animate-in fade-in duration-500 pb-12 max-w-lg mx-auto mt-6 sm:mt-10">
+      <Card className="text-center p-6 sm:p-12" glow>
+        <div className="w-16 h-16 sm:w-20 sm:h-20 mx-auto rounded-[20px] bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(6,182,212,0.3)]">
+          <QrCode className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
         </div>
-        <h1 className="text-3xl font-light text-white tracking-tight mb-2">Share Contact</h1>
-        <p className="text-sm text-slate-400 mb-10">Allow visitors to scan this QR code to instantly save your details.</p>
+        <h1 className="text-2xl sm:text-3xl font-light text-white tracking-tight mb-2">Share Contact</h1>
+        <p className="text-xs sm:text-sm text-slate-400 mb-8 sm:mb-10 px-4">Allow visitors to scan this QR code to instantly save your details.</p>
         
-        <div className="flex justify-center mb-10">
-          <div className="bg-white p-5 sm:p-6 rounded-[2rem] shadow-[0_0_50px_rgba(6,182,212,0.15)] border border-slate-700/50 transition-transform hover:scale-105 duration-500 flex items-center justify-center aspect-square w-[240px] h-[240px] sm:w-[280px] sm:h-[280px]">
+        <div className="flex justify-center mb-8 sm:mb-10">
+          <div className="bg-white p-4 sm:p-6 rounded-[2rem] shadow-[0_0_50px_rgba(6,182,212,0.15)] border border-slate-700/50 transition-transform hover:scale-105 duration-500 flex items-center justify-center aspect-square w-[220px] h-[220px] sm:w-[280px] sm:h-[280px]">
             <img src={qrUrl} alt="Contact QR Code" className="w-full h-full object-contain mix-blend-multiply" />
           </div>
         </div>
 
-        <div className="bg-[#0B101D]/80 border border-white/5 rounded-2xl p-6 text-left relative overflow-hidden">
+        <div className="bg-[#0B101D]/80 border border-white/5 rounded-2xl p-5 sm:p-6 text-left relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
-          <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4 border-b border-white/5 pb-2 relative z-10">Profile Card</p>
+          <p className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-slate-500 mb-4 border-b border-white/5 pb-2 relative z-10">Profile Card</p>
           <div className="space-y-3 relative z-10">
             <div>
-              <p className="text-xl font-medium text-white">Anant Mishra</p>
-              <p className="text-sm text-cyan-400">CIO @ Invade Code</p>
+              <p className="text-lg sm:text-xl font-medium text-white">Anant Mishra</p>
+              <p className="text-xs sm:text-sm text-cyan-400">CIO @ Invade Code</p>
             </div>
-            <div className="flex items-center gap-3 text-sm text-slate-300 mt-4">
-              <Mail className="w-4 h-4 text-slate-500" /> anant@invadecode.com
+            <div className="flex items-center gap-3 text-xs sm:text-sm text-slate-300 mt-4 break-all">
+              <Mail className="w-4 h-4 text-slate-500 shrink-0" /> anant@invadecode.com
             </div>
-            <div className="flex items-center gap-3 text-sm text-slate-300">
-              <PhoneCall className="w-4 h-4 text-slate-500" /> +91 77519 58550
+            <div className="flex items-center gap-3 text-xs sm:text-sm text-slate-300">
+              <PhoneCall className="w-4 h-4 text-slate-500 shrink-0" /> +91 77519 58550
             </div>
           </div>
         </div>
@@ -1245,21 +1303,21 @@ function AuthScreen({ onLogin }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#030712] flex items-center justify-center relative overflow-hidden font-sans p-6">
+    <div className="min-h-screen bg-[#030712] flex items-center justify-center relative overflow-hidden font-sans p-4 sm:p-6">
       <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-blue-900/20 blur-[120px] rounded-full mix-blend-screen pointer-events-none"></div>
       <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-cyan-900/15 blur-[120px] rounded-full mix-blend-screen pointer-events-none"></div>
       
       <div className="w-full max-w-md relative z-10 animate-in fade-in slide-in-from-bottom-8 duration-1000">
-        <div className="text-center mb-10 flex flex-col items-center">
-          <div className={`w-14 h-14 rounded-[20px] bg-gradient-to-br from-blue-600 to-cyan-400 flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(6,182,212,0.4)]`}>
-            <Zap className="w-7 h-7 text-white" />
+        <div className="text-center mb-8 sm:mb-10 flex flex-col items-center">
+          <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-[20px] bg-gradient-to-br from-blue-600 to-cyan-400 flex items-center justify-center mb-4 sm:mb-6 shadow-[0_0_30px_rgba(6,182,212,0.4)]`}>
+            <Zap className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight text-white mb-2">Invade Code - CRM</h1>
-          <p className="text-xs text-slate-400 tracking-widest uppercase">Operator Access Terminal</p>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-white mb-2">Invade Code - CRM</h1>
+          <p className="text-[10px] sm:text-xs text-slate-400 tracking-widest uppercase">Operator Access Terminal</p>
         </div>
 
-        <Card glow className="p-8">
-          <form onSubmit={handleSubmit} className="space-y-6">
+        <Card glow className="p-6 sm:p-8">
+          <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-6">
             {errorMsg && (
               <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs p-3 rounded-[10px]">
                 {errorMsg}
@@ -1271,7 +1329,7 @@ function AuthScreen({ onLogin }) {
             <Input required type="email" placeholder="anant@invadecode.com" icon={Mail} label="Secure Email" value={email} onChange={e => setEmail(e.target.value)} />
             <Input required type="password" placeholder="••••••••" icon={Key} label="Access Cipher" value={password} onChange={e => setPassword(e.target.value)} />
 
-            <div className="pt-4">
+            <div className="pt-2 sm:pt-4">
               <Button type="submit" className="w-full py-3" disabled={loading} icon={loading ? RefreshCw : LogIn}>
                 {loading ? 'Authenticating...' : (mode === 'login' ? 'Authenticate Session' : 'Initialize Profile')}
               </Button>
@@ -1281,7 +1339,7 @@ function AuthScreen({ onLogin }) {
               <button 
                 type="button" 
                 onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
-                className="text-[10px] text-slate-400 hover:text-cyan-400 transition-colors tracking-widest uppercase font-semibold"
+                className="text-[9px] sm:text-[10px] text-slate-400 hover:text-cyan-400 transition-colors tracking-widest uppercase font-semibold"
               >
                 {mode === 'login' ? 'Request Operator Access' : 'Return to Login'}
               </button>
@@ -1298,6 +1356,13 @@ function AuthScreen({ onLogin }) {
 // ============================================================================
 
 const AppShell = ({ user, onLogout, currentView, setCurrentView, children }) => {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Auto-close menu on navigation
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [currentView]);
+
   const NAV_GROUPS = [
     {
       title: 'Operations',
@@ -1317,14 +1382,19 @@ const AppShell = ({ user, onLogout, currentView, setCurrentView, children }) => 
 
   return (
     <div className={`min-h-screen ${THEME.bgBase} text-slate-300 font-sans flex overflow-hidden selection:bg-cyan-500/30`}>
+      {/* Mobile Sidebar Overlay */}
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden" onClick={() => setIsMobileMenuOpen(false)} />
+      )}
+
       {/* Sidebar */}
-      <aside className={`w-64 border-r ${THEME.border} ${THEME.bgSidebar} flex flex-col z-20 shrink-0 backdrop-blur-3xl hidden md:flex`}>
+      <aside className={`fixed inset-y-0 left-0 w-64 border-r ${THEME.border} ${THEME.bgSidebar} flex flex-col z-50 transform transition-transform duration-300 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 md:static shrink-0 backdrop-blur-3xl`}>
         <div className="h-16 flex items-center px-6 border-b border-white/5">
           <div className="flex items-center gap-3">
-            <div className={`w-8 h-8 bg-gradient-to-br from-blue-600 to-cyan-500 ${THEME.radius.sm} flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.3)]`}>
+            <div className={`w-8 h-8 bg-gradient-to-br from-blue-600 to-cyan-500 ${THEME.radius.sm} flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.3)] shrink-0`}>
               <Command className="w-4 h-4 text-white" />
             </div>
-            <span className="font-bold text-white tracking-wide text-sm uppercase">Invade Code<span className="font-light text-cyan-400"> CRM</span></span>
+            <span className="font-bold text-white tracking-wide text-sm uppercase truncate">Invade Code<span className="font-light text-cyan-400"> CRM</span></span>
           </div>
         </div>
 
@@ -1345,8 +1415,8 @@ const AppShell = ({ user, onLogout, currentView, setCurrentView, children }) => 
                           : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] border border-transparent'
                       }`}
                     >
-                      <item.icon className={`w-4 h-4 ${isActive ? 'text-cyan-400' : 'text-slate-500'}`} />
-                      {item.label}
+                      <item.icon className={`w-4 h-4 ${isActive ? 'text-cyan-400' : 'text-slate-500'} shrink-0`} />
+                      <span className="truncate">{item.label}</span>
                     </button>
                   )
                 })}
@@ -1357,16 +1427,16 @@ const AppShell = ({ user, onLogout, currentView, setCurrentView, children }) => 
 
         <div className="p-4 border-t border-white/5">
           <div className={`p-3 ${THEME.radius.lg} bg-white/[0.02] border border-white/5 flex items-center gap-3 mb-3`}>
-            <div className={`w-8 h-8 ${THEME.radius.sm} bg-[#0A0F1C] border border-white/10 flex items-center justify-center text-xs font-bold text-white`}>
+            <div className={`w-8 h-8 ${THEME.radius.sm} bg-[#0A0F1C] border border-white/10 flex items-center justify-center text-xs font-bold text-white shrink-0`}>
               {user.name.charAt(0).toUpperCase()}
             </div>
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-hidden min-w-0">
               <p className="text-xs font-semibold text-white truncate">{user.name}</p>
               <p className="text-[9px] text-cyan-500 uppercase tracking-widest truncate">{user.role}</p>
             </div>
           </div>
           <button onClick={onLogout} className={`w-full flex items-center justify-center gap-2 py-2 text-[10px] uppercase tracking-widest font-bold text-slate-500 hover:text-rose-400 transition-colors`}>
-            <LogOut className="w-3 h-3" /> Disconnect
+            <LogOut className="w-3 h-3 shrink-0" /> Disconnect
           </button>
         </div>
       </aside>
@@ -1374,10 +1444,20 @@ const AppShell = ({ user, onLogout, currentView, setCurrentView, children }) => 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 relative h-screen overflow-hidden">
         {/* Global Ambient Glow */}
-        <div className="absolute top-[-20%] left-1/4 w-[600px] h-[600px] bg-blue-900/10 blur-[150px] rounded-full pointer-events-none z-0"></div>
+        <div className="absolute top-[-20%] left-1/4 w-[600px] h-[600px] bg-blue-900/10 blur-[150px] rounded-full pointer-events-none z-0 hidden md:block"></div>
 
         {/* Top Header */}
-        <header className="h-16 flex items-center justify-end px-8 border-b border-white/5 bg-[#030712]/80 backdrop-blur-md relative z-20 shrink-0">
+        <header className="h-16 flex items-center justify-between md:justify-end px-4 sm:px-8 border-b border-white/5 bg-[#030712]/80 backdrop-blur-md relative z-20 shrink-0">
+           
+           <div className="flex items-center gap-3 md:hidden">
+             <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-slate-400 hover:text-white rounded-[10px] bg-white/[0.05]">
+               <Menu className="w-5 h-5" />
+             </button>
+             <span className="text-[10px] uppercase tracking-widest font-semibold text-slate-300">
+               {NAV_GROUPS.flatMap(g => g.items).find(i => i.id === currentView)?.label || currentView}
+             </span>
+           </div>
+
            <div className="flex items-center gap-4">
              <div className="relative hidden md:block">
                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -1391,7 +1471,7 @@ const AppShell = ({ user, onLogout, currentView, setCurrentView, children }) => 
         </header>
 
         {/* Scrollable View Area */}
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 relative z-10 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 relative z-10 custom-scrollbar">
           <div className="max-w-[1400px] mx-auto w-full h-full">
             {children}
           </div>
@@ -1399,7 +1479,8 @@ const AppShell = ({ user, onLogout, currentView, setCurrentView, children }) => 
       </main>
 
       <style dangerouslySetInnerHTML={{__html:`
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        @media (min-width: 640px) { .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; } }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(6,182,212,0.5); }
