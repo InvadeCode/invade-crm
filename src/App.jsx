@@ -623,6 +623,7 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, profiles = [], user }) => 
   const [isScanning, setIsScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isNewOwner, setIsNewOwner] = useState(false);
   
   const [stream, setStream] = useState(null);
   const videoRef = useRef(null);
@@ -671,10 +672,22 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, profiles = [], user }) => 
   const capturePhoto = () => {
     if (!videoRef.current) return;
     const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
-    const base64String = canvas.toDataURL('image/jpeg').split(',')[1];
+    
+    // HEAVY COMPRESSION: Ensure the image is small enough for Gemini API to process instantly without throwing "Payload Too Large"
+    const MAX_WIDTH = 1024;
+    let width = videoRef.current.videoWidth;
+    let height = videoRef.current.videoHeight;
+    
+    if (width > MAX_WIDTH) {
+      height = Math.round((height * MAX_WIDTH) / width);
+      width = MAX_WIDTH;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0, width, height);
+    
+    const base64String = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
     
     stopCamera();
     processImage(base64String, 'image/jpeg');
@@ -683,10 +696,41 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, profiles = [], user }) => 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    setIsScanning(true);
+    
+    // Read the file and compress it locally before sending to Gemini API
     const reader = new FileReader();
     reader.onloadend = () => {
-      const base64String = reader.result.split(',')[1];
-      processImage(base64String, file.type);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 1024;
+        let width = img.width;
+        let height = img.height;
+
+        // Scale down high-resolution smartphone photos
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        
+        // Compress to JPEG to dramatically reduce Base64 payload size
+        const base64String = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+        processImage(base64String, 'image/jpeg');
+      };
+      
+      img.onerror = () => {
+        console.error("Failed to load image for compression");
+        setIsScanning(false);
+        alert("Failed to read image file.");
+      };
+      
+      img.src = reader.result;
     };
     reader.readAsDataURL(file);
   };
@@ -797,7 +841,7 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, profiles = [], user }) => 
         onNavigate('directory'); 
       } catch (error) {
         console.error("Error saving lead:", error);
-        alert("Failed to save lead to Database.");
+        alert("Failed to save lead to Database. Ensure the 'leads' table has the new consultant_brief, ai_next_steps, and owner columns.");
       } finally {
         setIsSaving(false);
       }
@@ -850,14 +894,46 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, profiles = [], user }) => 
               <h2 className="text-xl sm:text-2xl font-light text-white tracking-tight mb-4">Operator <span className="font-semibold text-cyan-400">Identity</span></h2>
               
               <div className="bg-black/20 border border-white/5 p-4 sm:p-5 rounded-[16px] mb-6 sm:mb-8">
-                <Select 
-                  label="Assigned Lead Owner" 
-                  icon={UserCircle} 
-                  value={formData.owner} 
-                  onChange={e => setFormData({...formData, owner: e.target.value})} 
-                  options={profiles.map(p => ({ value: p.full_name, label: p.full_name }))}
-                  required
-                />
+                {!isNewOwner ? (
+                  <div className="space-y-1.5 w-full">
+                    <label className={`${THEME.label} ml-1`}>Assigned Lead Owner</label>
+                    <div className="relative group">
+                      <UserCircle className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-cyan-400 transition-colors z-10" />
+                      <select 
+                        className={`w-full bg-[#0B101D] border ${THEME.border} ${THEME.borderFocus} focus:ring-1 focus:ring-cyan-500/50 ${THEME.radius.md} py-3 text-sm text-white placeholder:text-slate-600 transition-all outline-none appearance-none cursor-pointer pl-11 pr-10`}
+                        value={formData.owner}
+                        onChange={e => {
+                          if (e.target.value === 'ADD_NEW') {
+                            setIsNewOwner(true);
+                            setFormData({...formData, owner: ''});
+                          } else {
+                            setFormData({...formData, owner: e.target.value});
+                          }
+                        }}
+                        required
+                      >
+                        <option value="" disabled>Select an owner...</option>
+                        {uniqueOwners.map(o => <option key={o} value={o}>{o}</option>)}
+                        <option value="ADD_NEW">+ Add New Owner...</option>
+                      </select>
+                      <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                    </div>
+                  </div>
+                ) : (
+                  <Input 
+                    label="New Assigned Lead Owner" 
+                    icon={UserCircle} 
+                    value={formData.owner} 
+                    onChange={e => setFormData({...formData, owner: e.target.value})} 
+                    placeholder="Type new owner name..." 
+                    required 
+                    rightIcon={X}
+                    onRightIconClick={() => {
+                      setIsNewOwner(false);
+                      setFormData({...formData, owner: uniqueOwners[0] || ''});
+                    }}
+                  />
+                )}
               </div>
 
               <div className="flex gap-2 p-1 bg-black/40 border border-white/5 rounded-xl w-full sm:w-fit mb-6">
