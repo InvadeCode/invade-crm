@@ -236,8 +236,29 @@ const Badge = ({ children, variant = 'blue', className = '' }) => {
 };
 
 // ============================================================================
-// 3. CONSTANTS
+// 3. MOCK DATA & CONSTANTS
 // ============================================================================
+
+const MOCK_LEADS = [
+  { 
+    id: 'TC-1042', name: 'Sarah Jenkins', role: 'VP Operations', company: 'Acme Corp Global', email: 'sarah@acme.co', phone: '+1 555-0192', industry: 'Manufacturing', score: 85, status: 'Hot', time: '10m ago', tags: ['Decision Maker', 'High Value'],
+    owner: 'Anant Mishra',
+    consultant_brief: "Sarah mentioned their fulfillment centers are using legacy ERP systems. They are currently evaluating AI solutions to automate inventory alerts because manual data entry is causing a 12% error rate. Budget is secured for Q3.",
+    ai_next_steps: "1. Send 'Predictive Supply Chain' whitepaper.\n2. Schedule a 30-min technical discovery call with an architect.\n3. Prepare ROI projection focusing on 12% error rate reduction."
+  },
+  { 
+    id: 'TC-1041', name: 'Marcus Chen', role: 'CTO', company: 'NexusTech', email: 'mchen@nexus.io', phone: '+1 555-8821', industry: 'Technology', score: 42, status: 'Nurture', time: '45m ago', tags: ['Evaluator'],
+    owner: 'Elena Rostova',
+    consultant_brief: "Marcus is just browsing. They recently migrated to AWS but aren't looking to deploy new AI tools until next year.",
+    ai_next_steps: "1. Add to the quarterly 'AI in Tech' newsletter nurture sequence.\n2. Set task to follow up in 6 months for a Q1 roadmap check-in."
+  },
+  { 
+    id: 'TC-1040', name: 'Elena Rostova', role: 'Director of IT', company: 'GlobalData', email: 'elena.r@gdata.com', phone: '+1 555-3342', industry: 'Finance', score: 91, status: 'Hot', time: '2h ago', tags: ['High Urgency', 'Decision Maker'],
+    owner: 'Anant Mishra',
+    consultant_brief: "Critical regulatory compliance needs. Elena needs a secure, isolated LLM instance to process internal audit logs. They are terrified of data leakage and need to move immediately.",
+    ai_next_steps: "1. Route immediately to Enterprise Security Sales Team.\n2. Share the 'Secure LLM Governance' blueprint.\n3. Request NDA to proceed with technical architecture review."
+  },
+];
 
 const INDUSTRIES = ['Technology', 'Healthcare', 'Finance', 'Manufacturing', 'Retail', 'Agency/Services', 'Other'];
 const TEAM_SIZES = ['1-10', '11-50', '51-200', '201-1000', '1000+'];
@@ -541,7 +562,13 @@ const LeadDirectoryView = ({ onNavigate, onLeadSelect, leads }) => {
                   <span className="mx-3 opacity-30">|</span> 
                   {lead.role}
                 </p>
+                <p className="text-slate-500 text-xs flex items-center mt-1.5">
+                  <UserCircle size={12} className="mr-1 text-slate-600" /> Owner: <span className="ml-1 text-slate-400 font-medium">{lead.owner || 'Unassigned'}</span>
+                </p>
                 <div className="flex flex-wrap gap-2 mt-3">
+                  {(lead.tags || []).map((tag, i) => (
+                    <Badge key={i} variant={tag.includes('Decision') || tag.includes('High') ? 'amber' : 'slate'} className="!text-[8px]">{tag}</Badge>
+                  ))}
                   <Badge variant={(lead.score >= 80 || lead.status === 'Hot') ? 'rose' : lead.status === 'Warm' ? 'amber' : 'blue'} className="!text-[8px]">{lead.status || 'New'}</Badge>
                 </div>
               </div>
@@ -570,7 +597,7 @@ const LeadDirectoryView = ({ onNavigate, onLeadSelect, leads }) => {
 // 6. MODULE: LEAD CAPTURE (Multi-step) WITH AI SCORING
 // ============================================================================
 
-const LeadCaptureModule = ({ onNavigate, onLeadAdded }) => {
+const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
   const [step, setStep] = useState(1);
   const steps = ['Identity', 'Organization', 'Intent', 'Verification'];
   
@@ -578,25 +605,40 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded }) => {
   const [isScanning, setIsScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isNewOwner, setIsNewOwner] = useState(false);
   
   const [formData, setFormData] = useState({ 
-    name: '', role: '', company: '', email: '', phone: '', industry: 'Technology', brief: ''
+    name: '', role: '', company: '', email: '', phone: '', industry: 'Technology', brief: '', owner: ''
   });
+
+  // Calculate unique past owners from existing leads database
+  const uniqueOwners = useMemo(() => {
+    const owners = leads.map(l => l.owner).filter(Boolean);
+    const unique = [...new Set(owners)];
+    return unique.length > 0 ? unique : ['Anant Mishra']; // Fallback if fully empty
+  }, [leads]);
+
+  // Set default owner to first item if available
+  useEffect(() => {
+    if (uniqueOwners.length > 0 && !formData.owner && !isNewOwner) {
+      setFormData(prev => ({ ...prev, owner: uniqueOwners[0] }));
+    }
+  }, [uniqueOwners, formData.owner, isNewOwner]);
 
   const handleScan = () => {
     setIsScanning(true);
     setTimeout(() => {
       setIsScanning(false);
       setScanComplete(true);
-      setFormData({
-        ...formData,
+      setFormData(prev => ({
+        ...prev,
         name: 'Alex Developer',
         role: 'Director of Technology',
         company: 'Innovatech LLC',
         email: 'alex@innovatech.example.com',
         phone: '+1 555 0192',
         industry: 'Technology'
-      });
+      }));
       setActiveTab('manual');
     }, 2000);
   };
@@ -646,6 +688,7 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded }) => {
           industry: formData.industry || 'Other',
           score: dynamicScore,
           status: dynamicStatus,
+          owner: formData.owner,
           consultant_brief: formData.brief,
           ai_next_steps: generatedSteps
         };
@@ -656,7 +699,7 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded }) => {
         onNavigate('directory'); 
       } catch (error) {
         console.error("Error saving lead:", error);
-        alert("Failed to save lead to Database. Ensure the 'leads' table has the new consultant_brief and ai_next_steps columns.");
+        alert("Failed to save lead to Database. Ensure the 'leads' table has the new consultant_brief, ai_next_steps, and owner columns.");
       } finally {
         setIsSaving(false);
       }
@@ -708,6 +751,49 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded }) => {
             <div className="space-y-6 animate-in slide-in-from-right-8 duration-500">
               <h2 className="text-2xl font-light text-white tracking-tight mb-4">Operator <span className="font-semibold text-cyan-400">Identity</span></h2>
               
+              <div className="bg-black/20 border border-white/5 p-5 rounded-[16px] mb-8">
+                {!isNewOwner ? (
+                  <div className="space-y-1.5 w-full">
+                    <label className={`${THEME.label} ml-1`}>Assigned Lead Owner</label>
+                    <div className="relative group">
+                      <UserCircle className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-cyan-400 transition-colors z-10" />
+                      <select 
+                        className={`w-full bg-[#0B101D] border ${THEME.border} ${THEME.borderFocus} focus:ring-1 focus:ring-cyan-500/50 ${THEME.radius.md} py-3 text-sm text-white placeholder:text-slate-600 transition-all outline-none appearance-none cursor-pointer pl-11 pr-10`}
+                        value={formData.owner}
+                        onChange={e => {
+                          if (e.target.value === 'ADD_NEW') {
+                            setIsNewOwner(true);
+                            setFormData({...formData, owner: ''});
+                          } else {
+                            setFormData({...formData, owner: e.target.value});
+                          }
+                        }}
+                        required
+                      >
+                        <option value="" disabled>Select an owner...</option>
+                        {uniqueOwners.map(o => <option key={o} value={o}>{o}</option>)}
+                        <option value="ADD_NEW">+ Add New Owner...</option>
+                      </select>
+                      <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                    </div>
+                  </div>
+                ) : (
+                  <Input 
+                    label="New Assigned Lead Owner" 
+                    icon={UserCircle} 
+                    value={formData.owner} 
+                    onChange={e => setFormData({...formData, owner: e.target.value})} 
+                    placeholder="Type new owner name..." 
+                    required 
+                    rightIcon={X}
+                    onRightIconClick={() => {
+                      setIsNewOwner(false);
+                      setFormData({...formData, owner: uniqueOwners[0] || ''});
+                    }}
+                  />
+                )}
+              </div>
+
               <div className="flex gap-2 p-1 bg-black/40 border border-white/5 rounded-xl w-fit mb-6">
                 <button onClick={() => setActiveTab('scan')} className={`px-6 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'scan' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Scan Card</button>
                 <button onClick={() => setActiveTab('manual')} className={`px-6 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'manual' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Manual Entry</button>
@@ -895,6 +981,10 @@ const LeadDetailDrawer = ({ lead, onClose, onLeadUpdated }) => {
               <p className="text-2xl font-light text-cyan-400">{lead.score || '--'}</p>
             </div>
             <div className="flex-1 bg-black/40 border border-white/5 p-4 rounded-[16px]">
+              <p className={`${THEME.label} mb-1`}>Owner</p>
+              <p className="text-sm font-medium text-slate-300 mt-2">{lead.owner || 'Unassigned'}</p>
+            </div>
+            <div className="flex-1 bg-black/40 border border-white/5 p-4 rounded-[16px]">
               <p className={`${THEME.label} mb-1`}>Status</p>
               <select 
                 value={status} 
@@ -942,6 +1032,132 @@ const LeadDetailDrawer = ({ lead, onClose, onLeadUpdated }) => {
   );
 };
 
+
+// ============================================================================
+// 6. MODULE: AI INSIGHTS
+// ============================================================================
+
+const AIInsightsView = ({ leads }) => {
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [hasAnalyzed, setHasAnalyzed] = useState(false);
+
+  const handleAnalysis = () => {
+    setIsAnalyzing(true);
+    setTimeout(() => {
+      setIsAnalyzing(false);
+      setHasAnalyzed(true);
+    }, 2500);
+  };
+
+  const chartData = useMemo(() => {
+    if (!leads || leads.length === 0) return [];
+    const counts = {};
+    leads.forEach(l => {
+      counts[l.industry] = (counts[l.industry] || 0) + 1;
+    });
+    return Object.entries(counts).map(([name, val]) => ({ name, val }));
+  }, [leads]);
+
+  const latestLead = leads && leads.length > 0 ? leads[0] : null;
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500 pb-12 max-w-5xl mx-auto">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-4">
+        <div>
+          <h1 className="text-3xl font-light text-white tracking-tight flex items-center gap-3">
+            <Sparkles className="w-6 h-6 text-purple-400" /> Global AI Insights
+          </h1>
+          <p className="text-sm text-slate-400 mt-1">Autonomous analysis of all captured booth telemetry.</p>
+        </div>
+        {!hasAnalyzed && (
+          <Button onClick={handleAnalysis} disabled={isAnalyzing || !leads || leads.length === 0} className="!bg-gradient-to-r !from-purple-600 !to-indigo-500 shadow-[0_0_20px_rgba(168,85,247,0.3)]">
+            {isAnalyzing ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : <BrainCircuit className="w-4 h-4 mr-2" />}
+            {isAnalyzing ? 'Analyzing Database...' : 'Run Global Analysis'}
+          </Button>
+        )}
+      </div>
+
+      {!hasAnalyzed && !isAnalyzing && (
+        <Card className="py-20 text-center border-purple-500/20 glow border-dashed border-2">
+          <BrainCircuit className="w-16 h-16 mx-auto text-slate-700 mb-6" />
+          <h3 className="text-xl font-medium text-white mb-2">Analysis Engine Idle</h3>
+          <p className="text-slate-400 text-sm max-w-md mx-auto">Click "Run Global Analysis" to trigger the LLM to process your {leads ? leads.length : 0} captured leads and identify strategic patterns.</p>
+        </Card>
+      )}
+
+      {isAnalyzing && (
+        <Card className="py-20 text-center border-purple-500/20 glow">
+          <div className="relative w-24 h-24 mx-auto mb-8">
+            <div className="absolute inset-0 rounded-full border-2 border-purple-500/20 border-t-purple-500 animate-spin"></div>
+            <div className="absolute inset-2 rounded-full border-2 border-blue-500/20 border-b-blue-500 animate-spin animation-direction-reverse"></div>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Sparkles className="w-8 h-8 text-purple-400 animate-pulse" />
+            </div>
+          </div>
+          <h3 className="text-xl font-medium text-white mb-2 animate-pulse">Synthesizing Telemetry...</h3>
+          <p className="text-slate-400 text-sm font-mono uppercase tracking-widest">Processing {leads ? leads.length : 0} lead entities</p>
+        </Card>
+      )}
+
+      {hasAnalyzed && (
+        <div className="space-y-6 animate-in slide-in-from-bottom-8 duration-700">
+          {latestLead && (
+            <Card className="border-t-2 border-t-emerald-500 bg-gradient-to-b from-emerald-900/10 to-transparent">
+              <h3 className={`${THEME.label} text-emerald-400 mb-4 flex items-center gap-2`}><User className="w-4 h-4"/> Recent Lead Insight: {latestLead.name}</h3>
+              <p className="text-sm text-slate-300 leading-relaxed font-light mb-6">
+                Based on the recent scan of <strong className="text-white">{latestLead.name} ({latestLead.role} @ {latestLead.company})</strong>, the AI predicts a high intent for <strong className="text-white">Enterprise Automation</strong> and <strong className="text-white">Op Debt reduction</strong>. Given the {latestLead.industry || 'technology'} sector context, we recommend fast-tracking this lead to a <strong className="text-white">Deep Consult</strong> emphasizing infrastructure scaling and technical ROI.
+              </p>
+              <div className="p-3 bg-black/40 border border-white/5 rounded-lg flex items-start gap-3">
+                <span className="text-emerald-500 mt-0.5">›</span>
+                <span className="text-xs text-slate-400">Action item: Send the "Op Debt Reduction" whitepaper and propose a 15-minute technical architecture review.</span>
+              </div>
+            </Card>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="border-t-2 border-t-purple-500 bg-gradient-to-b from-purple-900/10 to-transparent">
+              <h3 className={`${THEME.label} text-purple-400 mb-4 flex items-center gap-2`}><Target className="w-4 h-4"/> Audience Composition</h3>
+              <p className="text-sm text-slate-300 leading-relaxed font-light mb-6">
+                The AI detected a significant skew based on your {leads ? leads.length : 0} captures. The dominant sector is currently <strong className="text-white">{chartData.length > 0 ? chartData.sort((a,b)=>b.val-a.val)[0].name : 'Unknown'}</strong>.
+              </p>
+              <div className="h-[150px]">
+                {chartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RePieChart>
+                      <Pie data={chartData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={5} dataKey="val" stroke="none">
+                        {chartData.map((e, i) => <Cell key={i} fill={['#a855f7', '#3b82f6', '#06b6d4', '#475569', '#10b981'][i % 5]} />)}
+                      </Pie>
+                      <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{fontSize: '10px', textTransform: 'uppercase', color: '#94a3b8'}}/>
+                    </RePieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-600 text-xs">No chart data available</div>
+                )}
+              </div>
+            </Card>
+
+            <Card className="border-t-2 border-t-blue-500 bg-gradient-to-b from-blue-900/10 to-transparent">
+              <h3 className={`${THEME.label} text-blue-400 mb-4 flex items-center gap-2`}><AlertTriangle className="w-4 h-4"/> Revenue Bottlenecks</h3>
+              <p className="text-sm text-slate-300 leading-relaxed font-light mb-6">
+                Sentiment analysis across captured profiles reveals a consistent trend: highly qualified leads are struggling with legacy system integration, delaying adoption timelines.
+              </p>
+              <div className="space-y-3">
+                <div className="p-3 bg-black/40 border border-white/5 rounded-lg flex items-start gap-3">
+                  <span className="text-blue-500 mt-0.5">›</span>
+                  <span className="text-xs text-slate-400">High priority recommendation: Pivot follow-up messaging to highlight our pre-built integration connectors.</span>
+                </div>
+                <div className="p-3 bg-black/40 border border-white/5 rounded-lg flex items-start gap-3">
+                  <span className="text-blue-500 mt-0.5">›</span>
+                  <span className="text-xs text-slate-400">Opportunity identified: Fast-track leads scoring &gt;80 directly to technical architects.</span>
+                </div>
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ============================================================================
 // 7. MODULE: MY QR (CONTACT SHARE)
@@ -1245,7 +1461,7 @@ export default function App() {
     switch (currentView) {
       case 'dashboard': return <DashboardView onNavigate={setCurrentView} onLeadSelect={setSelectedLead} leads={leads} />;
       case 'directory': return <LeadDirectoryView onNavigate={setCurrentView} onLeadSelect={setSelectedLead} leads={leads} />;
-      case 'capture': return <LeadCaptureModule onNavigate={setCurrentView} onLeadAdded={fetchLeads} />;
+      case 'capture': return <LeadCaptureModule onNavigate={setCurrentView} onLeadAdded={fetchLeads} leads={leads} />;
       case 'qr': return <MyQRView />;
       default: return <div className="p-10 text-center text-slate-500">Module Initializing...</div>;
     }
