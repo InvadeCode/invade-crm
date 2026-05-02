@@ -9,7 +9,7 @@ import {
   Layers, Filter, Download, MoreHorizontal, Fingerprint, Key, Eye, EyeOff,
   UserCircle, ClipboardList, PieChart, TrendingDown, Box, Command,
   Calculator, DollarSign, Bell, Globe, Terminal, Radio,
-  Camera, QrCode, Sparkles, UploadCloud, MessageSquare
+  Camera, QrCode, Sparkles, UploadCloud, MessageSquare, Aperture
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, ReferenceLine,
@@ -100,6 +100,28 @@ const supabaseDb = {
     });
     if (!res.ok) throw new Error('Could not update lead');
     return await res.json();
+  },
+  async getProfiles() {
+    const token = localStorage.getItem('sb_token');
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles?select=*`, {
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('Could not fetch profiles');
+    return await res.json();
+  },
+  async upsertProfile(profileData) {
+    const token = localStorage.getItem('sb_token');
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+      method: 'POST',
+      headers: { 
+        'apikey': SUPABASE_ANON_KEY, 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify(profileData)
+    });
+    if (!res.ok) throw new Error('Could not upsert profile');
   }
 };
 
@@ -590,111 +612,138 @@ const LeadDirectoryView = ({ onNavigate, onLeadSelect, leads }) => {
 };
 
 // ============================================================================
-// 6. MODULE: LEAD CAPTURE (Multi-step) WITH AI SCORING & GEMINI OCR
+// 6. MODULE: LEAD CAPTURE (Multi-step) WITH LIVE CAMERA & GEMINI OCR
 // ============================================================================
 
-const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
+const LeadCaptureModule = ({ onNavigate, onLeadAdded, profiles = [], user }) => {
   const [step, setStep] = useState(1);
   const steps = ['Identity', 'Organization', 'Intent', 'Verification'];
   
-  const [activeTab, setActiveTab] = useState('scan');
+  const [activeTab, setActiveTab] = useState('scan'); // 'scan' | 'manual' | 'camera'
   const [isScanning, setIsScanning] = useState(false);
   const [scanComplete, setScanComplete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isNewOwner, setIsNewOwner] = useState(false);
   
-  const cameraInputRef = useRef(null);
+  const [stream, setStream] = useState(null);
+  const videoRef = useRef(null);
   const fileInputRef = useRef(null);
 
   const [formData, setFormData] = useState({ 
     name: '', role: '', company: '', email: '', phone: '', industry: 'Technology', brief: '', owner: ''
   });
 
-  // Calculate unique past owners from existing leads database
-  const uniqueOwners = useMemo(() => {
-    const owners = leads.map(l => l.owner).filter(Boolean);
-    const unique = [...new Set(owners)];
-    return unique.length > 0 ? unique : ['Anant Mishra'];
-  }, [leads]);
-
-  // Set default owner
+  // Set default owner to current logged-in user
   useEffect(() => {
-    if (uniqueOwners.length > 0 && !formData.owner && !isNewOwner) {
-      setFormData(prev => ({ ...prev, owner: uniqueOwners[0] }));
+    if (!formData.owner && user) {
+      setFormData(prev => ({ ...prev, owner: user.name }));
     }
-  }, [uniqueOwners, formData.owner, isNewOwner]);
+  }, [user, formData.owner]);
 
-  const handleFileChange = async (e) => {
+  // Handle Live Camera
+  const startCamera = async () => {
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      setStream(mediaStream);
+      setActiveTab('camera');
+    } catch (error) {
+      console.error("Camera access error:", error);
+      alert("Camera access denied or unavailable on this device. Please use 'Upload File' instead.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'camera' && videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+    if (activeTab !== 'camera') {
+      stopCamera();
+    }
+    return () => stopCamera();
+  }, [activeTab, stream]);
+
+  const capturePhoto = () => {
+    if (!videoRef.current) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
+    const base64String = canvas.toDataURL('image/jpeg').split(',')[1];
+    
+    stopCamera();
+    processImage(base64String, 'image/jpeg');
+  };
+
+  const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result.split(',')[1];
+      processImage(base64String, file.type);
+    };
+    reader.readAsDataURL(file);
+  };
 
+  const processImage = async (base64String, mimeType) => {
     setIsScanning(true);
-    
+    setActiveTab('scan');
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result.split(',')[1];
-        const mimeType = file.type;
-        
-        const apiKey = ""; // Provided by execution environment
-        const prompt = "Extract the contact information from this business card. If a field is missing, return an empty string.";
-        
-        const payload = {
-          contents: [{
-            role: "user",
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType, data: base64String } }
-            ]
-          }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: "OBJECT",
-              properties: {
-                name: { type: "STRING", description: "Full name of the person" },
-                role: { type: "STRING", description: "Job title or role" },
-                company: { type: "STRING", description: "Company name" },
-                email: { type: "STRING", description: "Email address" },
-                phone: { type: "STRING", description: "Phone number" }
-              },
-              required: ["name", "role", "company", "email", "phone"]
-            }
-          }
-        };
-
-        const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error?.message || "Failed to process image");
-        
-        const extractedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (extractedText) {
-          const extractedData = JSON.parse(extractedText);
-          setFormData(prev => ({
-            ...prev,
-            name: extractedData.name || '',
-            role: extractedData.role || '',
-            company: extractedData.company || '',
-            email: extractedData.email || '',
-            phone: extractedData.phone || ''
-          }));
-        }
-
-        setIsScanning(false);
-        setScanComplete(true);
-        setActiveTab('manual');
-      };
+      const apiKey = ""; // Provided by execution environment
+      const prompt = "Extract the contact information from this business card. If a field is missing, return an empty string.";
       
-      reader.readAsDataURL(file);
+      const payload = {
+        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType, data: base64String } }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              name: { type: "STRING", description: "Full name" },
+              role: { type: "STRING", description: "Job title" },
+              company: { type: "STRING", description: "Company name" },
+              email: { type: "STRING", description: "Email address" },
+              phone: { type: "STRING", description: "Phone number" }
+            },
+            required: ["name", "role", "company", "email", "phone"]
+          }
+        }
+      };
+
+      const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error?.message || "Failed to process image");
+      
+      const extractedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (extractedText) {
+        const extractedData = JSON.parse(extractedText);
+        setFormData(prev => ({
+          ...prev,
+          name: extractedData.name || '',
+          role: extractedData.role || '',
+          company: extractedData.company || '',
+          email: extractedData.email || '',
+          phone: extractedData.phone || ''
+        }));
+      }
+
+      setIsScanning(false);
+      setScanComplete(true);
+      setActiveTab('manual');
     } catch (error) {
       console.error("OCR Error:", error);
-      alert("Failed to scan card using AI. Please try manual entry.");
+      alert("Failed to scan card using AI. Please enter details manually.");
       setIsScanning(false);
+      setActiveTab('manual');
     }
   };
 
@@ -801,57 +850,33 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
               <h2 className="text-xl sm:text-2xl font-light text-white tracking-tight mb-4">Operator <span className="font-semibold text-cyan-400">Identity</span></h2>
               
               <div className="bg-black/20 border border-white/5 p-4 sm:p-5 rounded-[16px] mb-6 sm:mb-8">
-                {!isNewOwner ? (
-                  <div className="space-y-1.5 w-full">
-                    <label className={`${THEME.label} ml-1`}>Assigned Lead Owner</label>
-                    <div className="relative group">
-                      <UserCircle className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-cyan-400 transition-colors z-10" />
-                      <select 
-                        className={`w-full bg-[#0B101D] border ${THEME.border} ${THEME.borderFocus} focus:ring-1 focus:ring-cyan-500/50 ${THEME.radius.md} py-3 text-sm text-white placeholder:text-slate-600 transition-all outline-none appearance-none cursor-pointer pl-11 pr-10`}
-                        value={formData.owner}
-                        onChange={e => {
-                          if (e.target.value === 'ADD_NEW') {
-                            setIsNewOwner(true);
-                            setFormData({...formData, owner: ''});
-                          } else {
-                            setFormData({...formData, owner: e.target.value});
-                          }
-                        }}
-                        required
-                      >
-                        <option value="" disabled>Select an owner...</option>
-                        {uniqueOwners.map(o => <option key={o} value={o}>{o}</option>)}
-                        <option value="ADD_NEW">+ Add New Owner...</option>
-                      </select>
-                      <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
-                    </div>
-                  </div>
-                ) : (
-                  <Input 
-                    label="New Assigned Lead Owner" 
-                    icon={UserCircle} 
-                    value={formData.owner} 
-                    onChange={e => setFormData({...formData, owner: e.target.value})} 
-                    placeholder="Type new owner name..." 
-                    required 
-                    rightIcon={X}
-                    onRightIconClick={() => {
-                      setIsNewOwner(false);
-                      setFormData({...formData, owner: uniqueOwners[0] || ''});
-                    }}
-                  />
-                )}
+                <Select 
+                  label="Assigned Lead Owner" 
+                  icon={UserCircle} 
+                  value={formData.owner} 
+                  onChange={e => setFormData({...formData, owner: e.target.value})} 
+                  options={profiles.map(p => ({ value: p.full_name, label: p.full_name }))}
+                  required
+                />
               </div>
 
               <div className="flex gap-2 p-1 bg-black/40 border border-white/5 rounded-xl w-full sm:w-fit mb-6">
-                <button onClick={() => setActiveTab('scan')} className={`flex-1 sm:flex-none px-4 sm:px-6 py-2 rounded-lg text-[11px] sm:text-sm font-semibold transition-all ${activeTab === 'scan' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Scan Card</button>
+                <button onClick={() => setActiveTab('scan')} className={`flex-1 sm:flex-none px-4 sm:px-6 py-2 rounded-lg text-[11px] sm:text-sm font-semibold transition-all ${activeTab === 'scan' || activeTab === 'camera' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Scan Card</button>
                 <button onClick={() => setActiveTab('manual')} className={`flex-1 sm:flex-none px-4 sm:px-6 py-2 rounded-lg text-[11px] sm:text-sm font-semibold transition-all ${activeTab === 'manual' ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Manual Entry</button>
               </div>
 
+              {activeTab === 'camera' && (
+                <div className="p-4 sm:p-8 flex flex-col items-center justify-center text-center border-2 border-cyan-500/30 rounded-2xl min-h-[300px] bg-black">
+                   <video ref={videoRef} autoPlay playsInline className="w-full max-w-md rounded-lg mb-6 shadow-2xl" />
+                   <div className="flex gap-4">
+                     <Button onClick={capturePhoto} icon={Aperture}>Capture Frame</Button>
+                     <Button variant="ghost" onClick={() => setActiveTab('scan')}>Cancel</Button>
+                   </div>
+                </div>
+              )}
+
               {activeTab === 'scan' && (
                 <div className="p-8 sm:p-12 flex flex-col items-center justify-center text-center border-dashed border-2 border-white/10 rounded-2xl hover:border-cyan-500/30 transition-colors min-h-[300px] bg-black/20">
-                  {/* Two separate file inputs to distinctively support camera vs upload on mobile */}
-                  <input type="file" accept="image/*" capture="environment" className="hidden" ref={cameraInputRef} onChange={handleFileChange} />
                   <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
                   
                   {isScanning ? (
@@ -870,7 +895,7 @@ const LeadCaptureModule = ({ onNavigate, onLeadAdded, leads = [] }) => {
                         Use your device camera or upload an image to digitize card information.
                       </p>
                       <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto">
-                        <Button onClick={() => cameraInputRef.current?.click()} icon={Camera} className="w-full sm:w-auto">Take Photo</Button>
+                        <Button onClick={startCamera} icon={Camera} className="w-full sm:w-auto">Take Photo (Webcam)</Button>
                         <Button variant="secondary" onClick={() => fileInputRef.current?.click()} icon={UploadCloud} className="w-full sm:w-auto">Upload File</Button>
                       </div>
                     </div>
@@ -1283,19 +1308,19 @@ function AuthScreen({ onLogin }) {
         const { data, error } = await supabaseAuth.signUp(email, password, operatorId || email.split('@')[0]);
         if (error) throw error;
         if (data.user && data.session) {
-          onLogin({ name: data.user.user_metadata?.full_name || email.split('@')[0], role: data.user.user_metadata?.role || 'Strategic Advisor', email });
+          onLogin({ id: data.user.id, name: data.user.user_metadata?.full_name || email.split('@')[0], role: data.user.user_metadata?.role || 'Strategic Advisor', email });
         } else if (data.user && !data.session) {
           setErrorMsg('Check your email for the confirmation link.');
         }
       } else {
         const data = await supabaseAuth.signIn(email, password);
-        onLogin({ name: data.user.user_metadata?.full_name || email.split('@')[0], role: data.user.user_metadata?.role || 'Strategic Advisor', email });
+        onLogin({ id: data.user.id, name: data.user.user_metadata?.full_name || email.split('@')[0], role: data.user.user_metadata?.role || 'Strategic Advisor', email });
       }
     } catch (error) {
       setErrorMsg(error.message);
       // Fallback for demo purposes if Supabase fails
       setTimeout(() => {
-        onLogin({ name: 'Anant Mishra', role: 'CIO', email: email || 'anant@invadecode.com' });
+        onLogin({ id: 'demo-id', name: 'Anant Mishra', role: 'CIO', email: email || 'anant@invadecode.com' });
       }, 1000);
     } finally {
       setLoading(false);
@@ -1497,28 +1522,52 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [currentView, setCurrentView] = useState('dashboard');
   const [isInitializing, setIsInitializing] = useState(true);
+  
   const [leads, setLeads] = useState([]);
+  const [profiles, setProfiles] = useState([]);
   const [selectedLead, setSelectedLead] = useState(null);
 
-  // Fetch leads from Supabase on mount
+  // Fetch leads from Supabase
   const fetchLeads = async () => {
     try {
       const data = await supabaseDb.getLeads();
       setLeads(data || []);
     } catch (e) {
-      console.warn("Could not fetch from Supabase, using empty array:", e);
+      console.warn("Could not fetch leads from Supabase, using empty array.");
       setLeads([]);
+    }
+  };
+
+  // Fetch profiles from Supabase
+  const fetchProfiles = async () => {
+    try {
+      const data = await supabaseDb.getProfiles();
+      setProfiles(data || []);
+    } catch (e) {
+      console.warn("Could not fetch profiles from Supabase.");
+      setProfiles([]);
     }
   };
 
   useEffect(() => {
     supabaseAuth.getUser().then((userData) => {
       if (userData) {
-        setUser({
+        const userObj = {
+          id: userData.id,
           name: userData.user_metadata?.full_name || userData.email.split('@')[0],
           role: userData.user_metadata?.role || 'Strategic Advisor',
           email: userData.email
-        });
+        };
+        setUser(userObj);
+        
+        // Upsert profile and fetch both profiles and leads
+        supabaseDb.upsertProfile({
+          id: userObj.id,
+          full_name: userObj.name,
+          email: userObj.email,
+          role: userObj.role
+        }).then(() => fetchProfiles()).catch(e => console.error("Profile sync error", e));
+        
         fetchLeads();
       }
       setIsInitializing(false);
@@ -1535,14 +1584,23 @@ export default function App() {
   }
 
   if (!user) {
-    return <AuthScreen onLogin={(userData) => { setUser(userData); fetchLeads(); }} />;
+    return <AuthScreen onLogin={(userData) => { 
+      setUser(userData); 
+      supabaseDb.upsertProfile({
+        id: userData.id,
+        full_name: userData.name,
+        email: userData.email,
+        role: userData.role
+      }).then(() => fetchProfiles());
+      fetchLeads(); 
+    }} />;
   }
 
   const renderView = () => {
     switch (currentView) {
       case 'dashboard': return <DashboardView onNavigate={setCurrentView} onLeadSelect={setSelectedLead} leads={leads} />;
       case 'directory': return <LeadDirectoryView onNavigate={setCurrentView} onLeadSelect={setSelectedLead} leads={leads} />;
-      case 'capture': return <LeadCaptureModule onNavigate={setCurrentView} onLeadAdded={fetchLeads} leads={leads} />;
+      case 'capture': return <LeadCaptureModule onNavigate={setCurrentView} onLeadAdded={fetchLeads} leads={leads} profiles={profiles} user={user} />;
       case 'qr': return <MyQRView />;
       default: return <div className="p-10 text-center text-slate-500">Module Initializing...</div>;
     }
